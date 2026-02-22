@@ -4,7 +4,7 @@
 
 Live auction platform for M&M Auctions (Senatobia, MS) — liquidation/overstock house selling food, household items, cleaning supplies. Kody (auctioneer) runs consumer + dealer auctions with Shopify inventory. Whatnot-inspired, mobile-first, live-stream bidding. Owner retains code, may market to other auction houses (multi-tenant from day one).
 
-Revenue model: configurable buyer's premium. App is system of record; Shopify is downstream sync target.
+Revenue model: hammer fee (1.5-3% per sale, paid by auction house to platform, default 3%) configured per org by platform admin. Buyer's premium (schema-ready, disabled Phase 1). App is system of record; Shopify is downstream sync target.
 
 Phase 1 scope: Consumer live auctions only (UI), but schema + engine designed for all three types (live consumer, dealer bulk, buy-now). Passkey + password auth. Stripe basic (payment links). Shopify catalog import. Local pickup scheduling.
 
@@ -121,6 +121,10 @@ ALTER TABLE users ADD COLUMN passwordHash TEXT;
 ALTER TABLE users ADD COLUMN authMethod TEXT NOT NULL DEFAULT 'passkey'; -- passkey|password|both
 ALTER TABLE users ADD COLUMN failedLoginAttempts INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE users ADD COLUMN lockoutUntil TEXT;
+ALTER TABLE users ADD COLUMN isPlatformAdmin INTEGER NOT NULL DEFAULT 0; -- hardcode for app owner
+
+-- Add hammer fee to organizations (platform revenue — per-org, set by platform admin)
+ALTER TABLE organizations ADD COLUMN hammerFeePct INTEGER NOT NULL DEFAULT 300; -- 300 = 3.0%, range 150-300
 
 -- Add role to memberships (replaces flat userType)
 ALTER TABLE memberships ADD COLUMN role TEXT NOT NULL DEFAULT 'consumer';
@@ -241,7 +245,7 @@ CREATE TABLE auctions (
   -- Config
   defaultIncrementCents INTEGER NOT NULL DEFAULT 100, -- $1 default
   incrementRules TEXT, -- JSON: tiered rules e.g. [{"upTo":5000,"increment":100},{"upTo":25000,"increment":500}]
-  buyerPremiumPct INTEGER NOT NULL DEFAULT 10, -- stored as whole number, e.g. 10 = 10%
+  buyerPremiumPct INTEGER NOT NULL DEFAULT 0, -- stored as whole number, e.g. 10 = 10%. Disabled Phase 1 (schema-ready)
   extensionSeconds INTEGER NOT NULL DEFAULT 15,
   -- Stream
   streamProviderId TEXT,
@@ -389,7 +393,8 @@ CREATE TABLE orders (
   lotId TEXT NOT NULL,
   userId TEXT NOT NULL, -- winner
   amountCents INTEGER NOT NULL,
-  premiumCents INTEGER NOT NULL,
+  premiumCents INTEGER NOT NULL, -- buyer's premium (disabled Phase 1, will be 0)
+  platformFeeCents INTEGER NOT NULL DEFAULT 0, -- hammer fee owed to platform
   status TEXT NOT NULL DEFAULT 'won',
   -- won|invoiced|paid|packed|picked_up|shipped|delivered|refunded|disputed
   invoiceId TEXT, -- linked after invoice generation
@@ -593,7 +598,7 @@ Runs every minute. Checks D1 for auctions where:
 Export `queue()` handler alongside `fetch` in worker.tsx:
 
 - **bid-events:** Batch insert bid_events to D1, update lots denormalized fields (currentBidCents, currentBidderId, bidCount), update auction_summaries. Also insert chat_messages.
-- **post-auction:** Generate orders (one per winning lot per user), aggregate into invoices, calculate buyer's premium from fee_configurations, create Stripe payment links, update auction_summaries.
+- **post-auction:** Generate orders (one per winning lot per user), calculate platformFeeCents per order (hammerPrice * org.hammerFeePct / 10000), aggregate into invoices (buyer's premium disabled Phase 1 — premiumCents=0), create Stripe payment links, update auction_summaries.
 - **shopify-import:** Paginate Shopify REST API, map products to schema, download images to R2, track progress in import_jobs. Dedup by shopifyProductId.
 
 ---
@@ -698,9 +703,14 @@ Lightweight — just a widget + server-side verification call.
 /admin/settings             Org settings
 /admin/settings/fees        Fee configuration
 /admin/settings/stream      Stream provider config
+
+/platform                   Platform admin dashboard (isPlatformAdmin only)
+/platform/orgs              Manage tenant organizations
+/platform/orgs/:id          Org detail — set hammer fee, status, notes
+/platform/revenue           Platform revenue overview (hammer fees across orgs)
 ```
 
-Interruptors: requireAuth, requireAdmin (super_admin|admin), requireEmployee (auctioneer|catalog_manager|customer_service|shipping), requireDealer.
+Interruptors: requireAuth, requirePlatformAdmin (isPlatformAdmin flag), requireAdmin (super_admin|admin), requireEmployee (auctioneer|catalog_manager|customer_service|shipping), requireDealer.
 
 ---
 
@@ -845,6 +855,14 @@ src/
         routes.ts
         LoginPage.tsx
         RegisterPage.tsx
+      platform/
+        PlatformDashboard.tsx
+        PlatformOrgsPage.tsx
+        PlatformOrgDetailPage.tsx   # set hammer fee, status, notes
+        PlatformRevenuePage.tsx
+        server-functions/
+          orgs.ts
+          revenue.ts
 ```
 
 ---
@@ -855,7 +873,7 @@ src/
 2. Password auth (port from quality-garden)
 3. Migrations 002-013 (full schema)
 4. Shared utilities (audit, idempotency, money, state machine, increments, pagination, turnstile)
-5. Interruptors (requireAdmin, requireEmployee, requireDealer)
+5. Interruptors (requirePlatformAdmin, requireAdmin, requireEmployee, requireDealer)
 6. Mobile UI shell (layouts, bottom nav, responsive structure)
 7. Catalog: products + categories CRUD (admin, with perishable fields)
 8. Shopify import (queue consumer + admin UI + R2 image upload)
@@ -867,9 +885,10 @@ src/
 14. Cron trigger (scheduled auction transitions)
 15. Post-auction: orders + invoices + Stripe payment links
 16. Pickup scheduling (slot management + reservation)
-17. Fee configuration (admin UI + invoice calculation)
-18. Dealer profiles + dealer management (admin CRUD, approval flow, tier/standing)
-19. User detail page (admin: bid history, purchases, notes)
+17. Fee configuration (admin UI + invoice calculation — buyer's premium disabled Phase 1, hammer fee active)
+18. Platform admin section (org management, hammer fee per org, revenue overview)
+19. Dealer profiles + dealer management (admin CRUD, approval flow, tier/standing)
+20. User detail page (admin: bid history, purchases, notes)
 
 ---
 
@@ -886,12 +905,14 @@ src/
 - Place bids from both — verify real-time updates, increment enforcement, anti-snipe
 - Auctioneer console: place floor bid, advance lots, going once/twice/sold
 - Verify bid events + chat messages flushed to D1
-- Verify orders + invoices generated post-auction with correct buyer's premium
+- Verify orders generated post-auction with platformFeeCents calculated from org.hammerFeePct
+- Verify invoices generated (premiumCents=0, buyer's premium disabled Phase 1)
 - Verify Stripe payment link on invoice
 - Consumer: schedule pickup slot
 - Admin: view pickup reservations, mark picked up
 - Admin: view dealer profiles, approve dealer applications, adjust tier
 - Admin: user detail page with bid/purchase history
+- Platform admin: manage orgs, set hammer fee per org, view revenue
 - Test Cloudflare Stream embed
 
 ---
@@ -909,6 +930,7 @@ src/
 - Analytics/BI dashboard — Phase 6
 - Fraud detection — Phase 6
 - PWA/offline — Phase 6
+- Buyer's premium activation — Phase 2 (schema + columns exist, calculation disabled, premiumCents=0)
 - Sales tax calculation logic — Phase 2 (taxCents column exists, manual entry for now)
 
 ## Unresolved

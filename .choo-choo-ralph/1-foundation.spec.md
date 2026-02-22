@@ -168,7 +168,7 @@ auto_learnings: false
         import_jobs, and auction_summaries. Update AppDatabase type definitions to match.
       </description>
       <steps>
-        - Create migrations/0002_user_profiles_roles.sql (ALTER users + ALTER memberships)
+        - Create migrations/0002_user_profiles_roles.sql (ALTER users + ALTER memberships + ALTER organizations for hammerFeePct + isPlatformAdmin)
         - Create migrations/0003_dealer_profiles.sql
         - Create migrations/0004_audit_logs.sql
         - Create migrations/0005_categories_products.sql (with perishable fields)
@@ -248,6 +248,7 @@ auto_learnings: false
       </description>
       <steps>
         - Update src/app/interruptors.ts: add requireAdmin — checks ctx.currentOrganization.role in ['super_admin','admin'], redirects to /dashboard if not
+        - Add requirePlatformAdmin — checks ctx.user.isPlatformAdmin === 1, redirects to /dashboard if not
         - Add requireEmployee — checks role in ['super_admin','admin','auctioneer','catalog_manager','customer_service','shipping']
         - Add requireDealer — checks role === 'dealer' and membership isApproved
         - Ensure all interruptors call requireAuth first (chain pattern or explicit check)
@@ -259,6 +260,8 @@ auto_learnings: false
         3. Admin role hitting /admin → passes through
         4. Auctioneer role hitting admin auction pages → passes through (employee)
         5. Unapproved dealer hitting dealer routes → redirected
+        6. Non-platform-admin hitting /platform → redirected to /dashboard
+        7. Platform admin hitting /platform → passes through
       </test_steps>
       <review></review>
     </task>

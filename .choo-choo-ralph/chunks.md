@@ -8,7 +8,7 @@ Source: `plan.md` (build steps 1-19)
 | `2-catalog` | 7-8: Products/categories CRUD (admin, perishable fields), Shopify import (queue + R2) | pending |
 | `3-auction-admin` | 9-10: Auction CRUD + state machine + clone, lot management (reorder, grouping) | pending |
 | `4-live-engine` | 11-14: AuctionRoomDO (WS, bids, timers, anti-snipe, floor bids, chat, outbox), auction room UI (bidder + auctioneer console), Cloudflare Stream, cron trigger | pending |
-| `5-post-auction` | 15-19: Orders + invoices + Stripe payment links, pickup scheduling, fee config, dealer profiles + management, user detail page | pending |
+| `5-post-auction` | 15-20: Orders + invoices + Stripe payment links, pickup scheduling, fee config (hammer fee active, buyer's premium disabled), platform admin (org mgmt, hammer fee, revenue), dealer profiles, user detail page | pending |
 
 ## How to generate next spec
 
