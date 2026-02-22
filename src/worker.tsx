@@ -24,6 +24,23 @@ import {
   requirePlatformAdmin,
 } from "@/app/interruptors";
 
+// Admin catalog pages
+import { AdminCatalogPage } from "@/app/pages/admin/catalog/AdminCatalogPage";
+import { AdminCategoriesPage } from "@/app/pages/admin/catalog/AdminCategoriesPage";
+import { AdminProductFormPage } from "@/app/pages/admin/catalog/AdminProductFormPage";
+import { AdminImportPage } from "@/app/pages/admin/catalog/AdminImportPage";
+
+// Admin auction pages
+import { AdminAuctionsPage } from "@/app/pages/admin/auctions/AdminAuctionsPage";
+import { AdminAuctionFormPage } from "@/app/pages/admin/auctions/AdminAuctionFormPage";
+import { AdminLotsPage } from "@/app/pages/admin/auctions/AdminLotsPage";
+
+// Queue consumers
+import { processShopifyImport } from "@/queue/shopify-import";
+
+// R2 image serving
+import { getImage } from "@/lib/r2";
+
 // Export Durable Objects
 export { SessionDurableObject } from "@/session/durableObject";
 export { AuctionRoomDO } from "@/auction/durableObject";
@@ -56,6 +73,24 @@ declare module "rwsdk/worker" {
 
 const app = defineApp([
   setCommonHeaders(),
+
+  // Serve R2 images at /images/*
+  async ({ request }) => {
+    const url = new URL(request.url);
+    if (url.pathname.startsWith("/images/")) {
+      const key = url.pathname.slice("/images/".length);
+      const image = await getImage(key);
+      if (!image) {
+        return new Response("Not found", { status: 404 });
+      }
+      return new Response(image.body, {
+        headers: {
+          "Content-Type": image.contentType,
+          "Cache-Control": "public, max-age=31536000, immutable",
+        },
+      });
+    }
+  },
 
   // Load session and populate user/org context
   async ({ ctx, request }) => {
@@ -122,7 +157,18 @@ const app = defineApp([
     ]),
     ...prefix(
       "/admin",
-      layout(AdminLayout, [route("/", [requireEmployee, Placeholder])]),
+      layout(AdminLayout, [
+        route("/", [requireEmployee, Placeholder]),
+        route("/catalog", [requireEmployee, AdminCatalogPage]),
+        route("/catalog/categories", [requireEmployee, AdminCategoriesPage]),
+        route("/catalog/import", [requireEmployee, AdminImportPage]),
+        route("/catalog/products/new", [requireAdmin, AdminProductFormPage]),
+        route("/catalog/products/:id", [requireAdmin, AdminProductFormPage]),
+        route("/auctions", [requireEmployee, AdminAuctionsPage]),
+        route("/auctions/new", [requireAdmin, AdminAuctionFormPage]),
+        route("/auctions/:id/edit", [requireAdmin, AdminAuctionFormPage]),
+        route("/auctions/:id/lots", [requireEmployee, AdminLotsPage]),
+      ]),
     ),
     ...prefix(
       "/platform",
@@ -141,8 +187,21 @@ export default {
     ctx: ExecutionContext,
   ) {
     for (const message of batch.messages) {
-      console.log(`[queue:${batch.queue}] Processing message`, message.id);
-      message.ack();
+      const body = message.body as { type?: string };
+      try {
+        if (body?.type === "shopify-import") {
+          await processShopifyImport(body as any, env);
+        } else {
+          console.log(
+            `[queue:${batch.queue}] Unknown message type`,
+            message.id,
+          );
+        }
+        message.ack();
+      } catch (e) {
+        console.error(`[queue:${batch.queue}] Error processing message`, e);
+        message.retry();
+      }
     }
   },
   async scheduled(

@@ -3,7 +3,9 @@
   "name": "auction-platform",
   "main": "src/worker.tsx",
   "compatibility_date": "2025-08-21",
-  "compatibility_flags": ["nodejs_compat"],
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
   "assets": {
     "binding": "ASSETS"
   },
@@ -32,21 +34,39 @@
   "migrations": [
     {
       "tag": "v1",
-      "new_sqlite_classes": ["SessionDurableObject", "AuctionRoomDO"]
+      "new_sqlite_classes": [
+        "SessionDurableObject",
+        "AuctionRoomDO"
+      ]
     }
   ],
-  // R2, Queues, Cron — enable after billing setup
-  // "r2_buckets": [{ "binding": "IMAGES_BUCKET", "bucket_name": "auction-images" }],
-  // "queues": { ... },
-  // "triggers": { "crons": ["*/1 * * * *"] },
   "routes": [
     {
       "pattern": "auction.digitalglue.dev",
       "custom_domain": true
     }
   ],
+  "r2_buckets": [
+    {
+      "binding": "IMAGES",
+      "bucket_name": "auction-platform-images"
+    }
+  ],
+  "queues": {
+    "producers": [
+      {
+        "binding": "IMPORT_QUEUE",
+        "queue": "auction-import-queue"
+      }
+    ],
+    "consumers": [
+      {
+        "queue": "auction-import-queue"
+      }
+    ]
+  },
   "vars": {
-    "WEBAUTHN_APP_NAME": "M&M Auctions",
+    "WEBAUTHN_APP_NAME": "auction-platform",
     "WEBAUTHN_RP_ID": "auction.digitalglue.dev"
   }
 }

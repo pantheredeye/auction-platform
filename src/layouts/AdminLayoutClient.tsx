@@ -4,6 +4,7 @@ import { useState } from "react";
 import {
   Gavel,
   Package,
+  CalendarDays,
   ShoppingCart,
   FileText,
   Truck,
@@ -31,6 +32,7 @@ export interface NavItem {
 
 export const defaultAdminNavItems: NavItem[] = [
   { href: "/admin", label: "Dashboard", icon: Gavel },
+  { href: "/admin/auctions", label: "Auctions", icon: CalendarDays },
   { href: "/admin/catalog", label: "Catalog", icon: Package },
   { href: "/admin/orders", label: "Orders", icon: ShoppingCart },
   { href: "/admin/invoices", label: "Invoices", icon: FileText },
