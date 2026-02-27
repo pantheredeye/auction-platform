@@ -4,10 +4,13 @@ import { D1Dialect } from "kysely-d1";
 import type { AppDatabase } from "@/db";
 import type {
   AuctionRoomState,
+  BufferedBidEvent,
+  ClientMessage,
   LotState,
   ServerMessage,
   IncrementRule,
 } from "./types";
+import { resolveIncrement, validateBidAmount } from "./increments";
 
 // ─── Socket attachment ──────────────────────────────────────────────
 
@@ -34,6 +37,8 @@ interface StoredState {
 export class AuctionRoomDO extends DurableObject<Cloudflare.Env> {
   private state: AuctionRoomState;
   private stateLoaded = false;
+  private idempotencyKeys = new Set<string>();
+  private bidBuffer: BufferedBidEvent[] = [];
 
   constructor(ctx: DurableObjectState, env: Cloudflare.Env) {
     super(ctx, env);
@@ -208,6 +213,144 @@ export class AuctionRoomDO extends DurableObject<Cloudflare.Env> {
     }
     this.state.viewerCount = this.ctx.getWebSockets().length;
     this.broadcast({ type: "viewer_count", count: this.state.viewerCount });
+  }
+
+  async webSocketMessage(ws: WebSocket, message: string | ArrayBuffer) {
+    await this.ensureState();
+
+    let parsed: ClientMessage;
+    try {
+      parsed = JSON.parse(
+        typeof message === "string" ? message : new TextDecoder().decode(message),
+      ) as ClientMessage;
+    } catch {
+      this.sendToSocket(ws, { type: "error", message: "Invalid JSON" });
+      return;
+    }
+
+    if (parsed.type === "bid") {
+      this.handleBid(ws, parsed);
+    }
+    // Other message types (chat, etc.) handled by future epics
+  }
+
+  // ─── Bid handling ─────────────────────────────────────────────
+
+  private handleBid(
+    ws: WebSocket,
+    msg: { type: "bid"; lotId: string; amountCents: number; idempotencyKey: string },
+  ) {
+    const attachment = ws.deserializeAttachment() as SocketAttachment | null;
+    if (!attachment) {
+      this.sendToSocket(ws, { type: "error", message: "No attachment" });
+      return;
+    }
+
+    const { userId, username } = attachment;
+    const { lotId, amountCents, idempotencyKey } = msg;
+
+    // Find the lot
+    const lot = this.state.lots.get(lotId);
+    if (!lot) {
+      this.sendToSocket(ws, { type: "bid_rejected", lotId, reason: "Lot not found" });
+      return;
+    }
+
+    // Validate lot status allows bidding
+    const biddableStatuses = new Set(["active", "going_once", "going_twice"]);
+    if (!biddableStatuses.has(lot.status)) {
+      this.sendToSocket(ws, {
+        type: "bid_rejected",
+        lotId,
+        reason: `Lot is ${lot.status}, not accepting bids`,
+      });
+      return;
+    }
+
+    // Check idempotency
+    if (this.idempotencyKeys.has(idempotencyKey)) {
+      this.sendToSocket(ws, { type: "bid_rejected", lotId, reason: "Duplicate bid" });
+      return;
+    }
+
+    // Resolve increment and validate amount
+    const increment = resolveIncrement(
+      lot.currentBidCents,
+      lot.incrementCents,
+      this.state.incrementRules,
+      this.state.defaultIncrementCents,
+    );
+    const { valid, minimumBid } = validateBidAmount(
+      amountCents,
+      lot.currentBidCents,
+      increment,
+    );
+    if (!valid) {
+      this.sendToSocket(ws, {
+        type: "bid_rejected",
+        lotId,
+        reason: `Bid too low, minimum is ${minimumBid}`,
+      });
+      return;
+    }
+
+    // Capture previous state for event
+    const previousHighCents = lot.currentBidCents;
+    const previousHighUserId = lot.currentBidderId;
+
+    // Anti-snipe: reset going_once/going_twice to active, cancel alarm
+    if (lot.status === "going_once" || lot.status === "going_twice") {
+      lot.status = "active";
+      this.ctx.storage.deleteAlarm();
+    }
+
+    // Update lot state
+    lot.currentBidCents = amountCents;
+    lot.currentBidderId = userId;
+    lot.currentBidderName = username;
+    lot.bidCount++;
+    lot.sequence++;
+
+    // Track idempotency
+    this.idempotencyKeys.add(idempotencyKey);
+
+    // Buffer bid event for queue
+    this.bidBuffer.push({
+      auctionId: this.state.auctionId,
+      lotId,
+      userId,
+      type: "bid",
+      amountCents,
+      previousHighCents,
+      previousHighUserId,
+      onBehalfOfName: null,
+      placedByUserId: null,
+      idempotencyKey,
+      sequence: lot.sequence,
+      createdAt: new Date().toISOString(),
+    });
+
+    // Persist updated state
+    this.persistState();
+
+    // Send bid_accepted to bidder only
+    this.sendToSocket(ws, {
+      type: "bid_accepted",
+      lotId,
+      amountCents,
+      userId,
+      bidCount: lot.bidCount,
+    });
+
+    // Broadcast lot_update to all
+    this.broadcast({
+      type: "lot_update",
+      lotId,
+      status: lot.status,
+      currentBidCents: lot.currentBidCents,
+      currentBidderId: lot.currentBidderId,
+      bidCount: lot.bidCount,
+    });
   }
 
   // ─── Helpers ────────────────────────────────────────────────────
