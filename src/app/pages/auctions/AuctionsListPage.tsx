@@ -1,5 +1,7 @@
-import { Placeholder } from "@/app/pages/Placeholder";
+import { listLiveAuctions } from "./server-functions/browsing";
+import { AuctionsListClient } from "./AuctionsListClient";
 
-export function AuctionsListPage() {
-  return <Placeholder />;
+export async function AuctionsListPage() {
+  const auctions = await listLiveAuctions();
+  return <AuctionsListClient auctions={auctions} />;
 }
