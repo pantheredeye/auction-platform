@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { toast } from "sonner";
 import { Badge } from "@/app/components/ui/badge";
+import { Card, CardContent } from "@/app/components/ui/card";
 import type { AuctionsTable, LotsTable } from "@/db";
 import type {
   ServerMessage,
@@ -10,6 +11,8 @@ import type {
   LotStatus,
   AuctionStatus,
 } from "@/auction/types";
+import { formatCents } from "@/lib/money";
+import { imageUrl } from "@/lib/image-url";
 
 // ─── Types ──────────────────────────────────────────────────────────
 
@@ -19,6 +22,8 @@ interface BidFeedEntry {
   lotId: string;
   amountCents: number;
   userId: string;
+  username: string;
+  isFloor: boolean;
   bidCount: number;
   timestamp: number;
 }
@@ -52,8 +57,8 @@ interface AuctioneerConsoleProps {
 export function AuctioneerConsole({ auction, initialLots }: AuctioneerConsoleProps) {
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>("disconnected");
   const [currentLot, setCurrentLot] = useState<string | null>(null);
-  const [lots, setLots] = useState<Map<string, { status: LotStatus; currentBidCents: number | null; currentBidderId: string | null; bidCount: number }>>(
-    () => new Map(initialLots.map((l) => [l.id, { status: l.status as LotStatus, currentBidCents: l.currentBidCents, currentBidderId: l.currentBidderId, bidCount: l.bidCount }])),
+  const [lots, setLots] = useState<Map<string, { status: LotStatus; currentBidCents: number | null; currentBidderId: string | null; currentBidderName: string | null; bidCount: number }>>(
+    () => new Map(initialLots.map((l) => [l.id, { status: l.status as LotStatus, currentBidCents: l.currentBidCents, currentBidderId: l.currentBidderId, currentBidderName: null, bidCount: l.bidCount }])),
   );
   const [auctionStatus, setAuctionStatus] = useState<AuctionStatus>(auction.status as AuctionStatus);
   const [bidFeed, setBidFeed] = useState<BidFeedEntry[]>([]);
@@ -76,11 +81,24 @@ export function AuctioneerConsole({ auction, initialLots }: AuctioneerConsolePro
     switch (msg.type) {
       case "lot_update":
         setLots((prev) => {
+          const prevState = prev.get(msg.lotId);
+          // Detect new bid: bidCount increased
+          if (prevState && msg.bidCount > prevState.bidCount && msg.currentBidCents != null) {
+            const isFloor = msg.currentBidderName?.includes("(floor)") ?? false;
+            const displayName = isFloor
+              ? (msg.currentBidderName?.replace(" (floor)", "") ?? msg.currentBidderId ?? "Unknown")
+              : (msg.currentBidderName ?? msg.currentBidderId ?? "Unknown");
+            setBidFeed((feed) => [
+              ...feed,
+              { lotId: msg.lotId, amountCents: msg.currentBidCents!, userId: msg.currentBidderId ?? "", username: displayName, isFloor, bidCount: msg.bidCount, timestamp: Date.now() },
+            ].slice(-50));
+          }
           const next = new Map(prev);
           next.set(msg.lotId, {
             status: msg.status,
             currentBidCents: msg.currentBidCents,
             currentBidderId: msg.currentBidderId,
+            currentBidderName: msg.currentBidderName,
             bidCount: msg.bidCount,
           });
           return next;
@@ -95,10 +113,7 @@ export function AuctioneerConsole({ auction, initialLots }: AuctioneerConsolePro
         break;
 
       case "bid_accepted":
-        setBidFeed((prev) => [
-          { lotId: msg.lotId, amountCents: msg.amountCents, userId: msg.userId, bidCount: msg.bidCount, timestamp: Date.now() },
-          ...prev,
-        ].slice(0, 50));
+        // bid_accepted only comes to the bidder's own socket; bid feed is built from lot_update
         break;
 
       case "bid_rejected":
@@ -261,42 +276,16 @@ export function AuctioneerConsole({ auction, initialLots }: AuctioneerConsolePro
         </aside>
 
         {/* Center: Current lot + bid feed */}
-        <main className="overflow-y-auto p-4 space-y-4">
+        <main className="overflow-y-auto p-4 flex flex-col gap-4">
           {currentLotData && currentLotState ? (
-            <div className="space-y-3">
-              <div className="flex items-center justify-between">
-                <h2 className="text-xl font-bold">
-                  Lot #{currentLotData.lotNumber}: {currentLotData.title}
-                </h2>
-                <LotStatusBadge status={currentLotState.status} />
-              </div>
-              <div className="grid grid-cols-3 gap-4">
-                <Stat label="Current bid" value={currentLotState.currentBidCents != null ? `$${(currentLotState.currentBidCents / 100).toFixed(2)}` : "No bids"} />
-                <Stat label="Starting" value={`$${(currentLotData.startingPriceCents / 100).toFixed(2)}`} />
-                <Stat label="Bids" value={String(currentLotState.bidCount)} />
-              </div>
-            </div>
+            <CurrentLotCard lot={currentLotData} state={currentLotState} />
           ) : (
             <div className="flex items-center justify-center h-32 text-muted-foreground text-sm">
               No active lot
             </div>
           )}
 
-          {/* Bid feed */}
-          <div>
-            <h3 className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">Bid Feed</h3>
-            <div className="space-y-1">
-              {bidFeed.length === 0 && (
-                <p className="text-xs text-muted-foreground">No bids yet</p>
-              )}
-              {bidFeed.map((bid, i) => (
-                <div key={`${bid.lotId}-${bid.timestamp}-${i}`} className="flex items-center justify-between text-sm py-1 border-b border-border/50">
-                  <span className="font-mono">${(bid.amountCents / 100).toFixed(2)}</span>
-                  <span className="text-xs text-muted-foreground truncate max-w-[120px]">{bid.userId}</span>
-                </div>
-              ))}
-            </div>
-          </div>
+          <BidFeedPanel entries={bidFeed} />
         </main>
 
         {/* Right: Chat */}
@@ -319,26 +308,125 @@ export function AuctioneerConsole({ auction, initialLots }: AuctioneerConsolePro
   );
 }
 
-// ─── Sub-components ─────────────────────────────────────────────────
+// ─── Helpers ────────────────────────────────────────────────────────
 
-function LotStatusBadge({ status }: { status: LotStatus }) {
-  const variants: Record<LotStatus, "default" | "secondary" | "destructive" | "outline"> = {
-    pending: "secondary",
-    active: "default",
-    going_once: "destructive",
-    going_twice: "destructive",
-    sold: "outline",
-    passed: "outline",
-    withdrawn: "outline",
-  };
-  return <Badge variant={variants[status]} className="text-[10px] px-1.5 py-0">{status.replace("_", " ")}</Badge>;
+function timeAgo(timestamp: number): string {
+  const seconds = Math.floor((Date.now() - timestamp) / 1000);
+  if (seconds < 5) return "just now";
+  if (seconds < 60) return `${seconds}s ago`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  return `${Math.floor(minutes / 60)}h ago`;
 }
 
-function Stat({ label, value }: { label: string; value: string }) {
+// ─── Sub-components ─────────────────────────────────────────────────
+
+const LOT_STATUS_COLORS: Record<LotStatus, string> = {
+  pending: "bg-muted text-muted-foreground",
+  active: "bg-green-500/15 text-green-700 dark:text-green-400 border-green-500/30",
+  going_once: "bg-yellow-500/15 text-yellow-700 dark:text-yellow-400 border-yellow-500/30",
+  going_twice: "bg-orange-500/15 text-orange-700 dark:text-orange-400 border-orange-500/30",
+  sold: "bg-red-500/15 text-red-700 dark:text-red-400 border-red-500/30",
+  passed: "bg-gray-500/15 text-gray-600 dark:text-gray-400 border-gray-500/30",
+  withdrawn: "bg-gray-500/15 text-gray-600 dark:text-gray-400 border-gray-500/30",
+};
+
+function LotStatusBadge({ status }: { status: LotStatus }) {
   return (
-    <div>
-      <p className="text-xs text-muted-foreground">{label}</p>
-      <p className="text-lg font-semibold">{value}</p>
+    <Badge variant="outline" className={`text-[10px] px-1.5 py-0 ${LOT_STATUS_COLORS[status]}`}>
+      {status.replace("_", " ")}
+    </Badge>
+  );
+}
+
+function CurrentLotCard({
+  lot,
+  state,
+}: {
+  lot: LotWithItems;
+  state: { status: LotStatus; currentBidCents: number | null; currentBidderId: string | null; currentBidderName: string | null; bidCount: number };
+}) {
+  const thumbnail = lot.thumbnailUrl ?? lot.items[0]?.thumbnailUrl;
+  const hasBids = state.bidCount > 0 && state.currentBidCents != null;
+  const bidderDisplay = state.currentBidderName?.replace(" (floor)", "") ?? state.currentBidderId;
+
+  return (
+    <Card className="py-4">
+      <CardContent className="flex gap-4">
+        {/* Lot image */}
+        <div className="w-28 h-28 flex-shrink-0 rounded-lg overflow-hidden bg-muted flex items-center justify-center">
+          {thumbnail ? (
+            <img src={imageUrl(thumbnail)} alt={lot.title} className="w-full h-full object-cover" />
+          ) : (
+            <span className="text-xs text-muted-foreground">No image</span>
+          )}
+        </div>
+
+        {/* Lot info */}
+        <div className="flex-1 min-w-0 space-y-2">
+          <div className="flex items-start justify-between gap-2">
+            <div>
+              <p className="text-xs text-muted-foreground">Lot #{lot.lotNumber}</p>
+              <h2 className="text-xl font-bold leading-tight truncate">{lot.title}</h2>
+            </div>
+            <LotStatusBadge status={state.status} />
+          </div>
+
+          <div className="flex items-baseline gap-6">
+            <div>
+              <p className="text-xs text-muted-foreground">{hasBids ? "Current bid" : "Starting price"}</p>
+              <p className="text-3xl font-bold tabular-nums">
+                {hasBids ? formatCents(state.currentBidCents!) : formatCents(lot.startingPriceCents)}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">Bids</p>
+              <Badge variant="secondary" className="text-sm font-semibold">{state.bidCount}</Badge>
+            </div>
+          </div>
+
+          {hasBids && bidderDisplay && (
+            <p className="text-sm text-muted-foreground truncate">
+              High bidder: <span className="font-medium text-foreground">{bidderDisplay}</span>
+              {state.currentBidderName?.includes("(floor)") && (
+                <span className="ml-1 text-amber-600 dark:text-amber-400 text-xs font-medium">(floor)</span>
+              )}
+            </p>
+          )}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function BidFeedPanel({ entries }: { entries: BidFeedEntry[] }) {
+  const bottomRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [entries.length]);
+
+  return (
+    <div className="flex-1 flex flex-col min-h-0">
+      <h3 className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">Bid Feed</h3>
+      <div className="flex-1 overflow-y-auto border rounded-lg p-2 space-y-0.5 min-h-[120px]">
+        {entries.length === 0 && (
+          <p className="text-xs text-muted-foreground text-center py-4">No bids yet</p>
+        )}
+        {entries.map((bid, i) => (
+          <div key={`${bid.lotId}-${bid.timestamp}-${i}`} className="flex items-center justify-between text-sm py-1.5 px-2 rounded hover:bg-muted/50">
+            <div className="flex items-center gap-2 min-w-0">
+              <span className="font-mono font-semibold">{formatCents(bid.amountCents)}</span>
+              <span className="text-muted-foreground truncate max-w-[140px]">{bid.username}</span>
+              {bid.isFloor && (
+                <span className="text-amber-600 dark:text-amber-400 text-xs font-medium shrink-0">(floor)</span>
+              )}
+            </div>
+            <span className="text-xs text-muted-foreground shrink-0 ml-2">{timeAgo(bid.timestamp)}</span>
+          </div>
+        ))}
+        <div ref={bottomRef} />
+      </div>
     </div>
   );
 }

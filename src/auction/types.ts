@@ -98,7 +98,7 @@ export type ClientMessage =
 export type ServerMessage =
   | { type: "bid_accepted"; lotId: string; amountCents: number; userId: string; bidCount: number }
   | { type: "bid_rejected"; lotId: string; reason: string }
-  | { type: "lot_update"; lotId: string; status: LotStatus; currentBidCents: number | null; currentBidderId: string | null; bidCount: number }
+  | { type: "lot_update"; lotId: string; status: LotStatus; currentBidCents: number | null; currentBidderId: string | null; currentBidderName: string | null; bidCount: number }
   | { type: "auction_update"; status: AuctionStatus; activeLotNumber: number | null }
   | { type: "chat_message"; id: string; userId: string; username: string; content: string; createdAt: string }
   | { type: "viewer_count"; count: number }

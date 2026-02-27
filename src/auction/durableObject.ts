@@ -164,6 +164,7 @@ export class AuctionRoomDO extends DurableObject<Cloudflare.Env> {
       status: lotData.status,
       currentBidCents: lotData.currentBidCents,
       currentBidderId: lotData.currentBidderId,
+      currentBidderName: lotData.currentBidderName,
       bidCount: lotData.bidCount,
     });
 
@@ -223,6 +224,7 @@ export class AuctionRoomDO extends DurableObject<Cloudflare.Env> {
         status: lot.status,
         currentBidCents: lot.currentBidCents,
         currentBidderId: lot.currentBidderId,
+        currentBidderName: lot.currentBidderName,
         bidCount: lot.bidCount,
       });
       // Set alarm for sold/passed transition
@@ -246,6 +248,7 @@ export class AuctionRoomDO extends DurableObject<Cloudflare.Env> {
         status: lot.status,
         currentBidCents: lot.currentBidCents,
         currentBidderId: lot.currentBidderId,
+        currentBidderName: lot.currentBidderName,
         bidCount: lot.bidCount,
       });
     }
@@ -420,6 +423,7 @@ export class AuctionRoomDO extends DurableObject<Cloudflare.Env> {
       status: lot.status,
       currentBidCents: lot.currentBidCents,
       currentBidderId: lot.currentBidderId,
+      currentBidderName: lot.currentBidderName,
       bidCount: lot.bidCount,
     });
   }
@@ -872,6 +876,7 @@ export class AuctionRoomDO extends DurableObject<Cloudflare.Env> {
       status: lot.status,
       currentBidCents: lot.currentBidCents,
       currentBidderId: lot.currentBidderId,
+      currentBidderName: lot.currentBidderName,
       bidCount: lot.bidCount,
     });
   }
@@ -920,6 +925,7 @@ export class AuctionRoomDO extends DurableObject<Cloudflare.Env> {
         status: lot.status,
         currentBidCents: lot.currentBidCents,
         currentBidderId: lot.currentBidderId,
+        currentBidderName: lot.currentBidderName,
         bidCount: lot.bidCount,
       });
     }
