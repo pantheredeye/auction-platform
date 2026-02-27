@@ -456,6 +456,12 @@ export class AuctionRoomDO extends DurableObject<Cloudflare.Env> {
       case "close_auction":
         await this.handleCloseAuction(ws);
         break;
+      case "floor_bid":
+        await this.handleFloorBid(ws, attachment, msg);
+        break;
+      case "quick_add_lot":
+        await this.handleQuickAddLot(ws, msg);
+        break;
       default:
         this.sendToSocket(ws, { type: "error", message: "Unknown admin command" });
     }
@@ -658,6 +664,167 @@ export class AuctionRoomDO extends DurableObject<Cloudflare.Env> {
       type: "auction_update",
       status: this.state.status,
       activeLotNumber: null,
+    });
+  }
+
+  // ─── Floor bid ──────────────────────────────────────────────────
+
+  private async handleFloorBid(
+    ws: WebSocket,
+    attachment: SocketAttachment,
+    msg: { type: "floor_bid"; lotId: string; amountCents: number; onBehalfOfName: string },
+  ) {
+    const lot = this.state.lots.get(msg.lotId);
+    if (!lot) {
+      this.sendToSocket(ws, { type: "error", message: "Lot not found" });
+      return;
+    }
+
+    const biddableStatuses = new Set(["active", "going_once", "going_twice"]);
+    if (!biddableStatuses.has(lot.status)) {
+      this.sendToSocket(ws, {
+        type: "error",
+        message: `Lot is ${lot.status}, not accepting bids`,
+      });
+      return;
+    }
+
+    // Validate bid amount using same increment rules as regular bids
+    const increment = resolveIncrement(
+      lot.currentBidCents,
+      lot.incrementCents,
+      this.state.incrementRules,
+      this.state.defaultIncrementCents,
+    );
+    const { valid, minimumBid } = validateBidAmount(
+      msg.amountCents,
+      lot.currentBidCents,
+      increment,
+    );
+    if (!valid) {
+      this.sendToSocket(ws, {
+        type: "error",
+        message: `Bid too low, minimum is ${minimumBid}`,
+      });
+      return;
+    }
+
+    const previousHighCents = lot.currentBidCents;
+    const previousHighUserId = lot.currentBidderId;
+
+    // Anti-snipe: reset countdown to active
+    if (lot.status === "going_once" || lot.status === "going_twice") {
+      lot.status = "active";
+      this.ctx.storage.deleteAlarm();
+    }
+
+    lot.currentBidCents = msg.amountCents;
+    lot.currentBidderId = attachment.userId;
+    lot.currentBidderName = msg.onBehalfOfName + " (floor)";
+    lot.bidCount++;
+    lot.sequence++;
+
+    const idempotencyKey = crypto.randomUUID();
+    this.bidBuffer.push({
+      auctionId: this.state.auctionId,
+      lotId: msg.lotId,
+      userId: attachment.userId,
+      type: "floor_bid",
+      amountCents: msg.amountCents,
+      previousHighCents,
+      previousHighUserId,
+      onBehalfOfName: msg.onBehalfOfName,
+      placedByUserId: attachment.userId,
+      idempotencyKey,
+      sequence: lot.sequence,
+      createdAt: new Date().toISOString(),
+    });
+
+    if (this.bidBuffer.length >= 10) {
+      this.flushBidBuffer();
+    }
+
+    await this.persistState();
+    this.broadcastLotUpdate(lot);
+  }
+
+  // ─── Quick-add lot ──────────────────────────────────────────────
+
+  private async handleQuickAddLot(
+    ws: WebSocket,
+    msg: { type: "quick_add_lot"; title: string; startingPriceCents: number },
+  ) {
+    const lotId = crypto.randomUUID();
+
+    // Determine next lot number
+    const lotNumbers = [...this.state.lots.values()].map((l) => l.lotNumber);
+    const nextLotNumber = lotNumbers.length > 0 ? Math.max(...lotNumbers) + 1 : 1;
+
+    const now = new Date().toISOString();
+
+    // Insert into D1
+    const db = new Kysely<AppDatabase>({
+      dialect: new D1Dialect({ database: this.env.DB }),
+    });
+    await db
+      .insertInto("lots")
+      .values({
+        id: lotId,
+        organizationId: this.state.organizationId,
+        auctionId: this.state.auctionId,
+        lotNumber: nextLotNumber,
+        title: msg.title,
+        startingPriceCents: msg.startingPriceCents,
+        status: "pending",
+        currentBidCents: null,
+        bidCount: 0,
+        quantity: 1,
+        version: 1,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .execute();
+
+    // Create LotState and add to in-memory state
+    const lotState: LotState = {
+      id: lotId,
+      lotNumber: nextLotNumber,
+      title: msg.title,
+      description: "",
+      imageUrl: "",
+      startingPriceCents: msg.startingPriceCents,
+      currentBidCents: msg.startingPriceCents,
+      currentBidderId: null,
+      currentBidderName: null,
+      bidCount: 0,
+      incrementCents: null,
+      status: "pending",
+      sequence: 0,
+    };
+    this.state.lots.set(lotId, lotState);
+
+    // Auto-activate if no current active lot and auction is live
+    if (!this.state.currentLotId && this.state.status === "live") {
+      lotState.status = "active";
+      lotState.sequence++;
+      this.state.currentLotId = lotId;
+
+      // Also update D1
+      await db
+        .updateTable("lots")
+        .set({ status: "active", updatedAt: new Date().toISOString() })
+        .where("id", "=", lotId)
+        .execute();
+    }
+
+    await this.persistState();
+    this.broadcastLotUpdate(lotState);
+    this.broadcast({
+      type: "auction_update",
+      status: this.state.status,
+      activeLotNumber: this.state.currentLotId
+        ? this.state.lots.get(this.state.currentLotId)?.lotNumber ?? null
+        : null,
     });
   }
 
