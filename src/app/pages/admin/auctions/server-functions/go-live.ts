@@ -3,6 +3,7 @@ import { db } from "@/db";
 import { env } from "cloudflare:workers";
 import { requestInfo } from "rwsdk/worker";
 import { logAudit } from "@/lib/audit";
+import { createLiveInput } from "@/lib/stream/cloudflare-stream";
 
 export async function quickGoLive() {
   const { ctx } = requestInfo;
@@ -75,6 +76,40 @@ export async function quickGoLive() {
     })
     .execute();
 
+  // Create Cloudflare Stream live input
+  let streamProviderId: string | null = null;
+  try {
+    const stream = await createLiveInput(title);
+    streamProviderId = crypto.randomUUID();
+
+    await db
+      .insertInto("stream_providers")
+      .values({
+        id: streamProviderId,
+        organizationId: orgId,
+        providerType: "cloudflare_stream",
+        name: title,
+        config: JSON.stringify({
+          uid: stream.uid,
+          whipUrl: stream.whipUrl,
+          whepUrl: stream.whepUrl,
+        }),
+        isDefault: 0,
+        isActive: 1,
+        createdAt: nowIso,
+        updatedAt: nowIso,
+      })
+      .execute();
+
+    await db
+      .updateTable("auctions")
+      .set({ streamProviderId, updatedAt: nowIso })
+      .where("id", "=", id)
+      .execute();
+  } catch (e) {
+    console.error("Failed to create stream live input:", e);
+  }
+
   // Initialize AuctionRoomDO
   const doId = env.AUCTION_ROOM.idFromName(id);
   const stub = env.AUCTION_ROOM.get(doId);
@@ -87,5 +122,5 @@ export async function quickGoLive() {
 
   await logAudit("auction", id, "quick_go_live", { title, type: "live_consumer" });
 
-  return { auctionId: id };
+  return { auctionId: id, streamProviderId };
 }
