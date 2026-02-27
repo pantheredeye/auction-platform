@@ -43,6 +43,51 @@ export interface IncrementRule {
   increment: number;
 }
 
+// ─── DO state ───────────────────────────────────────────────────────
+
+export interface LotState {
+  id: string;
+  lotNumber: number;
+  title: string;
+  description: string;
+  imageUrl: string;
+  startingPriceCents: number;
+  currentBidCents: number;
+  currentBidderId: string | null;
+  currentBidderName: string | null;
+  bidCount: number;
+  incrementCents: number | null;
+  status: LotStatus;
+  sequence: number;
+}
+
+export interface AuctionRoomState {
+  auctionId: string;
+  organizationId: string;
+  status: AuctionStatus;
+  lots: Map<string, LotState>;
+  currentLotId: string | null;
+  viewerCount: number;
+  connectedUsers: Set<string>;
+  defaultIncrementCents: number;
+  incrementRules: IncrementRule[];
+}
+
+export interface BufferedBidEvent {
+  auctionId: string;
+  lotId: string;
+  userId: string;
+  type: BidEventType;
+  amountCents: number;
+  previousHighCents: number;
+  previousHighUserId: string | null;
+  onBehalfOfName: string | null;
+  placedByUserId: string | null;
+  idempotencyKey: string;
+  sequence: number;
+  createdAt: string;
+}
+
 // ─── WebSocket messages ─────────────────────────────────────────────
 
 export type ClientMessage =
@@ -69,4 +114,5 @@ export type AdminMessage =
   | { type: "withdraw"; lotId: string }
   | { type: "floor_bid"; lotId: string; amountCents: number; onBehalfOfName: string }
   | { type: "start_auction" }
-  | { type: "close_auction" };
+  | { type: "close_auction" }
+  | { type: "quick_add_lot"; title: string; startingPriceCents: number };
