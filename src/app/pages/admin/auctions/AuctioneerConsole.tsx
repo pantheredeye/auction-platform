@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { Badge } from "@/app/components/ui/badge";
 import { Button } from "@/app/components/ui/button";
 import { Card, CardContent } from "@/app/components/ui/card";
+import { Input } from "@/app/components/ui/input";
 import type { AuctionsTable, LotsTable } from "@/db";
 import type {
   ServerMessage,
@@ -48,6 +49,13 @@ interface LotWithItems extends LotsTable {
   }[];
 }
 
+interface DynamicLot {
+  id: string;
+  lotNumber: number;
+  title: string;
+  startingPriceCents: number;
+}
+
 interface AuctioneerConsoleProps {
   auction: AuctionsTable;
   initialLots: LotWithItems[];
@@ -65,6 +73,9 @@ export function AuctioneerConsole({ auction, initialLots }: AuctioneerConsolePro
   const [bidFeed, setBidFeed] = useState<BidFeedEntry[]>([]);
   const [viewerCount, setViewerCount] = useState(0);
   const [chatMessages, setChatMessages] = useState<ChatMsg[]>([]);
+
+  const [dynamicLots, setDynamicLots] = useState<DynamicLot[]>([]);
+  const pendingAdds = useRef<{ title: string; startingPriceCents: number }[]>([]);
 
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectAttempt = useRef(0);
@@ -94,6 +105,26 @@ export function AuctioneerConsole({ auction, initialLots }: AuctioneerConsolePro
               { lotId: msg.lotId, amountCents: msg.currentBidCents!, userId: msg.currentBidderId ?? "", username: displayName, isFloor, bidCount: msg.bidCount, timestamp: Date.now() },
             ].slice(-50));
           }
+
+          // Track new lots from quick-add
+          if (!prevState) {
+            const pending = pendingAdds.current.shift();
+            setDynamicLots((dl) => {
+              if (dl.some((d) => d.id === msg.lotId)) return dl;
+              const maxNum = dl.reduce((m, d) => Math.max(m, d.lotNumber), 0);
+              const maxInitial = initialLots.reduce((m, l) => Math.max(m, l.lotNumber), 0);
+              return [
+                ...dl,
+                {
+                  id: msg.lotId,
+                  lotNumber: Math.max(maxNum, maxInitial) + 1,
+                  title: pending?.title ?? "Lot",
+                  startingPriceCents: pending?.startingPriceCents ?? (msg.currentBidCents ?? 0),
+                },
+              ];
+            });
+          }
+
           const next = new Map(prev);
           next.set(msg.lotId, {
             status: msg.status,
@@ -139,7 +170,7 @@ export function AuctioneerConsole({ auction, initialLots }: AuctioneerConsolePro
       case "pong":
         break;
     }
-  }, []);
+  }, [initialLots]);
 
   useEffect(() => {
     isMounted.current = true;
@@ -208,8 +239,14 @@ export function AuctioneerConsole({ auction, initialLots }: AuctioneerConsolePro
 
   // ─── Derived state ──────────────────────────────────────────────
 
+  // Combine initial + dynamically-added lots, sorted by lotNumber
+  const allLots: { id: string; lotNumber: number; title: string; startingPriceCents: number; thumbnailUrl?: string | null; items?: LotWithItems["items"] }[] = [
+    ...initialLots,
+    ...dynamicLots.filter((d) => !initialLots.some((l) => l.id === d.id)),
+  ].sort((a, b) => a.lotNumber - b.lotNumber);
+
   const currentLotData = currentLot
-    ? initialLots.find((l) => l.id === currentLot)
+    ? allLots.find((l) => l.id === currentLot)
     : null;
   const currentLotState = currentLot ? lots.get(currentLot) : null;
 
@@ -222,7 +259,13 @@ export function AuctioneerConsole({ auction, initialLots }: AuctioneerConsolePro
 
   const isLive = auctionStatus === "live";
   const isConnected = connectionStatus === "connected";
-  const hasPendingLots = initialLots.some((l) => lots.get(l.id)?.status === "pending");
+  const isLotActive = currentLotState && (currentLotState.status === "active" || currentLotState.status === "going_once" || currentLotState.status === "going_twice");
+  const hasPendingLots = allLots.some((l) => lots.get(l.id)?.status === "pending");
+
+  // Pre-fill floor bid: current bid + default increment
+  const nextBidCents = currentLotState?.currentBidCents != null
+    ? currentLotState.currentBidCents + auction.defaultIncrementCents
+    : (currentLotData?.startingPriceCents ?? 0);
 
   // ─── Render ─────────────────────────────────────────────────────
 
@@ -257,22 +300,28 @@ export function AuctioneerConsole({ auction, initialLots }: AuctioneerConsolePro
         {/* Left: Lot queue */}
         <aside className="border-r overflow-y-auto p-3 space-y-1">
           <h2 className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">Lots</h2>
-          {initialLots.map((lot) => {
+          {allLots.map((lot) => {
             const state = lots.get(lot.id);
+            const status = state?.status ?? "pending";
             const isActive = lot.id === currentLot;
+            const isSold = status === "sold";
             return (
               <div
                 key={lot.id}
                 className={`p-2 rounded text-sm cursor-default ${isActive ? "bg-primary/10 border border-primary/30" : "hover:bg-muted/50"}`}
               >
                 <div className="flex items-center justify-between">
-                  <span className="font-medium">#{lot.lotNumber}</span>
-                  <LotStatusBadge status={state?.status ?? (lot.status as LotStatus)} />
+                  <div className="flex items-center gap-1.5">
+                    <LotStatusIndicator status={status} />
+                    <span className="font-medium">#{lot.lotNumber}</span>
+                  </div>
                 </div>
                 <p className="text-xs text-muted-foreground truncate mt-0.5">{lot.title}</p>
-                {state?.currentBidCents != null && (
-                  <p className="text-xs font-mono mt-0.5">${(state.currentBidCents / 100).toFixed(2)}</p>
-                )}
+                <p className="text-xs font-mono mt-0.5">
+                  {isSold && state?.currentBidCents != null
+                    ? formatCents(state.currentBidCents)
+                    : formatCents(lot.startingPriceCents)}
+                </p>
               </div>
             );
           })}
@@ -298,6 +347,23 @@ export function AuctioneerConsole({ auction, initialLots }: AuctioneerConsolePro
               onSend={sendMessage}
             />
           )}
+
+          {isLotActive && currentLot && (
+            <FloorBidForm
+              lotId={currentLot}
+              nextBidCents={nextBidCents}
+              isConnected={isConnected}
+              onSend={sendMessage}
+            />
+          )}
+
+          <QuickAddLotForm
+            isConnected={isConnected}
+            onSend={(msg) => {
+              pendingAdds.current.push({ title: msg.title, startingPriceCents: msg.startingPriceCents });
+              sendMessage(msg);
+            }}
+          />
 
           <BidFeedPanel entries={bidFeed} />
         </main>
@@ -357,10 +423,10 @@ function CurrentLotCard({
   lot,
   state,
 }: {
-  lot: LotWithItems;
+  lot: { id: string; lotNumber: number; title: string; startingPriceCents: number; thumbnailUrl?: string | null; items?: LotWithItems["items"] };
   state: { status: LotStatus; currentBidCents: number | null; currentBidderId: string | null; currentBidderName: string | null; bidCount: number };
 }) {
-  const thumbnail = lot.thumbnailUrl ?? lot.items[0]?.thumbnailUrl;
+  const thumbnail = lot.thumbnailUrl ?? lot.items?.[0]?.thumbnailUrl;
   const hasBids = state.bidCount > 0 && state.currentBidCents != null;
   const bidderDisplay = state.currentBidderName?.replace(" (floor)", "") ?? state.currentBidderId;
 
@@ -533,6 +599,132 @@ function CountdownBar({ status }: { status: "going_once" | "going_twice" }) {
         }
       `}</style>
     </div>
+  );
+}
+
+function LotStatusIndicator({ status }: { status: LotStatus }) {
+  switch (status) {
+    case "pending":
+      return <span className="inline-block h-2 w-2 rounded-full bg-gray-400" />;
+    case "active":
+    case "going_once":
+    case "going_twice":
+      return <span className="inline-block h-2 w-2 rounded-full bg-green-500 animate-pulse" />;
+    case "sold":
+      return <span className="text-green-600 dark:text-green-400 text-xs font-bold leading-none">✓</span>;
+    case "passed":
+      return <span className="text-gray-500 text-xs font-bold leading-none">✕</span>;
+    case "withdrawn":
+      return <span className="text-gray-500 text-xs font-bold leading-none">–</span>;
+  }
+}
+
+function QuickAddLotForm({
+  isConnected,
+  onSend,
+}: {
+  isConnected: boolean;
+  onSend: (msg: { type: "quick_add_lot"; title: string; startingPriceCents: number }) => void;
+}) {
+  const [title, setTitle] = useState("");
+  const [price, setPrice] = useState("");
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const trimmedTitle = title.trim();
+    if (!trimmedTitle || !price) return;
+    const dollars = parseFloat(price);
+    if (isNaN(dollars) || dollars <= 0) return;
+    onSend({ type: "quick_add_lot", title: trimmedTitle, startingPriceCents: Math.round(dollars * 100) });
+    setTitle("");
+    setPrice("");
+  };
+
+  return (
+    <form onSubmit={handleSubmit} className="flex items-end gap-2">
+      <div className="flex-1 min-w-0">
+        <label className="text-xs text-muted-foreground">Title</label>
+        <Input
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          placeholder="Lot title"
+          className="h-8 text-sm"
+        />
+      </div>
+      <div className="w-24">
+        <label className="text-xs text-muted-foreground">Price ($)</label>
+        <Input
+          type="number"
+          min="0.01"
+          step="0.01"
+          value={price}
+          onChange={(e) => setPrice(e.target.value)}
+          placeholder="0.00"
+          className="h-8 text-sm"
+        />
+      </div>
+      <Button type="submit" size="sm" disabled={!isConnected || !title.trim() || !price} className="h-8">
+        Add &amp; Activate
+      </Button>
+    </form>
+  );
+}
+
+function FloorBidForm({
+  lotId,
+  nextBidCents,
+  isConnected,
+  onSend,
+}: {
+  lotId: string;
+  nextBidCents: number;
+  isConnected: boolean;
+  onSend: (msg: AdminMessage) => void;
+}) {
+  const [amount, setAmount] = useState((nextBidCents / 100).toFixed(2));
+  const [bidderName, setBidderName] = useState("");
+
+  // Update pre-fill when nextBidCents changes
+  useEffect(() => {
+    setAmount((nextBidCents / 100).toFixed(2));
+  }, [nextBidCents]);
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const trimmedName = bidderName.trim();
+    if (!trimmedName || !amount) return;
+    const dollars = parseFloat(amount);
+    if (isNaN(dollars) || dollars <= 0) return;
+    onSend({ type: "floor_bid", lotId, amountCents: Math.round(dollars * 100), onBehalfOfName: trimmedName });
+    setBidderName("");
+  };
+
+  return (
+    <form onSubmit={handleSubmit} className="flex items-end gap-2">
+      <div className="w-28">
+        <label className="text-xs text-muted-foreground">Bid ($)</label>
+        <Input
+          type="number"
+          min="0.01"
+          step="0.01"
+          value={amount}
+          onChange={(e) => setAmount(e.target.value)}
+          className="h-8 text-sm"
+        />
+      </div>
+      <div className="flex-1 min-w-0">
+        <label className="text-xs text-muted-foreground">Bidder name</label>
+        <Input
+          value={bidderName}
+          onChange={(e) => setBidderName(e.target.value)}
+          placeholder="Floor bidder"
+          className="h-8 text-sm"
+        />
+      </div>
+      <Button type="submit" size="sm" variant="secondary" disabled={!isConnected || !bidderName.trim() || !amount} className="h-8">
+        Place Floor Bid
+      </Button>
+    </form>
   );
 }
 
