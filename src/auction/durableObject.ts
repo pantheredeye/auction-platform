@@ -47,6 +47,7 @@ export class AuctionRoomDO extends DurableObject<Cloudflare.Env> {
   private stateLoaded = false;
   private idempotencyKeys = new Set<string>();
   private bidBuffer: BufferedBidEvent[] = [];
+  private chatRateLimits = new Map<string, number>();
 
   constructor(ctx: DurableObjectState, env: Cloudflare.Env) {
     super(ctx, env);
@@ -292,10 +293,11 @@ export class AuctionRoomDO extends DurableObject<Cloudflare.Env> {
 
     if (type === "bid") {
       this.handleBid(ws, parsed as unknown as ClientMessage & { type: "bid" });
+    } else if (type === "chat") {
+      this.handleChat(ws, parsed as unknown as ClientMessage & { type: "chat" });
     } else if (ADMIN_MESSAGE_TYPES.has(type as string)) {
       await this.handleAdminMessage(ws, parsed as unknown as AdminMessage);
     }
-    // Other message types (chat, etc.) handled by future epics
   }
 
   // ─── Bid handling ─────────────────────────────────────────────
@@ -419,6 +421,39 @@ export class AuctionRoomDO extends DurableObject<Cloudflare.Env> {
       currentBidCents: lot.currentBidCents,
       currentBidderId: lot.currentBidderId,
       bidCount: lot.bidCount,
+    });
+  }
+
+  // ─── Chat handling ──────────────────────────────────────────────
+
+  private handleChat(ws: WebSocket, msg: { type: "chat"; content: string }) {
+    const attachment = ws.deserializeAttachment() as SocketAttachment | null;
+    if (!attachment) {
+      this.sendToSocket(ws, { type: "error", message: "No attachment" });
+      return;
+    }
+
+    const { userId, username } = attachment;
+    const now = Date.now();
+
+    // Rate limit: 1 chat per 2 seconds per user
+    const lastChat = this.chatRateLimits.get(userId);
+    if (lastChat && now - lastChat < 2000) {
+      this.sendToSocket(ws, { type: "error", message: "Rate limit: wait 2s between messages" });
+      return;
+    }
+    this.chatRateLimits.set(userId, now);
+
+    // Truncate content to 500 chars
+    const content = msg.content.slice(0, 500);
+
+    this.broadcast({
+      type: "chat_message",
+      id: crypto.randomUUID(),
+      userId,
+      username,
+      content,
+      createdAt: new Date().toISOString(),
     });
   }
 
@@ -899,10 +934,14 @@ export class AuctionRoomDO extends DurableObject<Cloudflare.Env> {
 
   private async flushBidBuffer() {
     if (this.bidBuffer.length === 0) return;
-    await this.env.BID_EVENTS_QUEUE.sendBatch(
-      this.bidBuffer.map((event) => ({ body: event })),
-    );
-    this.bidBuffer = [];
+    try {
+      await this.env.BID_EVENTS_QUEUE.sendBatch(
+        this.bidBuffer.map((event) => ({ body: event })),
+      );
+      this.bidBuffer = [];
+    } catch {
+      // Keep events in buffer for retry on next flush
+    }
   }
 
   // ─── State persistence & recovery ──────────────────────────────
