@@ -15,10 +15,12 @@ import type {
 } from "@/auction/types";
 import { formatCents } from "@/lib/money";
 import { imageUrl } from "@/lib/image-url";
+import { getStreamWhipUrl } from "./server-functions/go-live";
 
 // ─── Types ──────────────────────────────────────────────────────────
 
 type ConnectionStatus = "connecting" | "connected" | "reconnecting" | "disconnected";
+type StreamStatus = "idle" | "previewing" | "connecting" | "live" | "error";
 
 interface BidFeedEntry {
   lotId: string;
@@ -77,6 +79,12 @@ export function AuctioneerConsole({ auction, initialLots }: AuctioneerConsolePro
   const [dynamicLots, setDynamicLots] = useState<DynamicLot[]>([]);
   const pendingAdds = useRef<{ title: string; startingPriceCents: number }[]>([]);
 
+  // Stream state
+  const [streamStatus, setStreamStatus] = useState<StreamStatus>("idle");
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const mediaStreamRef = useRef<MediaStream | null>(null);
+  const pcRef = useRef<RTCPeerConnection | null>(null);
+
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectAttempt = useRef(0);
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -87,6 +95,116 @@ export function AuctioneerConsole({ auction, initialLots }: AuctioneerConsolePro
     if (ws?.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify(msg));
     }
+  }, []);
+
+  const startCamera = useCallback(async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+      mediaStreamRef.current = stream;
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+      }
+      setStreamStatus("previewing");
+    } catch (err) {
+      console.error("Camera access denied:", err);
+      toast.error("Camera access denied. Please allow camera and microphone permissions.");
+      setStreamStatus("error");
+    }
+  }, []);
+
+  const stopCamera = useCallback(() => {
+    // Close peer connection if active
+    if (pcRef.current) {
+      pcRef.current.close();
+      pcRef.current = null;
+    }
+    // Stop all tracks
+    if (mediaStreamRef.current) {
+      for (const track of mediaStreamRef.current.getTracks()) {
+        track.stop();
+      }
+      mediaStreamRef.current = null;
+    }
+    if (videoRef.current) {
+      videoRef.current.srcObject = null;
+    }
+    setStreamStatus("idle");
+  }, []);
+
+  const startStream = useCallback(async () => {
+    if (!mediaStreamRef.current) return;
+    setStreamStatus("connecting");
+
+    try {
+      const whipUrl = await getStreamWhipUrl(auction.id);
+      if (!whipUrl) {
+        toast.error("No stream configured for this auction");
+        setStreamStatus("previewing");
+        return;
+      }
+
+      const pc = new RTCPeerConnection();
+      pcRef.current = pc;
+
+      for (const track of mediaStreamRef.current.getTracks()) {
+        pc.addTrack(track, mediaStreamRef.current);
+      }
+
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+
+      const resp = await fetch(whipUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/sdp" },
+        body: offer.sdp,
+      });
+
+      if (!resp.ok) {
+        throw new Error(`WHIP negotiation failed: ${resp.status}`);
+      }
+
+      const answerSdp = await resp.text();
+      await pc.setRemoteDescription({ type: "answer", sdp: answerSdp });
+
+      pc.onconnectionstatechange = () => {
+        if (pc.connectionState === "connected") {
+          setStreamStatus("live");
+        } else if (pc.connectionState === "failed" || pc.connectionState === "disconnected") {
+          setStreamStatus("error");
+        }
+      };
+
+      // If already connected by the time we check
+      if (pc.connectionState === "connected") {
+        setStreamStatus("live");
+      }
+    } catch (err) {
+      console.error("Stream start failed:", err);
+      toast.error("Failed to start stream");
+      if (pcRef.current) {
+        pcRef.current.close();
+        pcRef.current = null;
+      }
+      setStreamStatus("previewing");
+    }
+  }, [auction.id]);
+
+  const stopStream = useCallback(() => {
+    if (pcRef.current) {
+      pcRef.current.close();
+      pcRef.current = null;
+    }
+    setStreamStatus("previewing");
+  }, []);
+
+  // Cleanup camera/stream on unmount
+  useEffect(() => {
+    return () => {
+      if (pcRef.current) pcRef.current.close();
+      if (mediaStreamRef.current) {
+        for (const track of mediaStreamRef.current.getTracks()) track.stop();
+      }
+    };
   }, []);
 
   const handleServerMessage = useCallback((msg: ServerMessage) => {
@@ -327,8 +445,18 @@ export function AuctioneerConsole({ auction, initialLots }: AuctioneerConsolePro
           })}
         </aside>
 
-        {/* Center: Current lot + bid feed */}
+        {/* Center: Stream + current lot + bid feed */}
         <main className="overflow-y-auto p-4 flex flex-col gap-4">
+          {/* Camera / Stream section */}
+          <StreamPanel
+            streamStatus={streamStatus}
+            videoRef={videoRef}
+            onStartCamera={startCamera}
+            onStopCamera={stopCamera}
+            onStartStream={startStream}
+            onStopStream={stopStream}
+          />
+
           {currentLotData && currentLotState ? (
             <CurrentLotCard lot={currentLotData} state={currentLotState} />
           ) : (
@@ -725,6 +853,85 @@ function FloorBidForm({
         Place Floor Bid
       </Button>
     </form>
+  );
+}
+
+const STREAM_STATUS_LABELS: Record<StreamStatus, { label: string; color: string }> = {
+  idle: { label: "Camera Off", color: "bg-gray-500" },
+  previewing: { label: "Preview", color: "bg-blue-500" },
+  connecting: { label: "Connecting...", color: "bg-yellow-500 animate-pulse" },
+  live: { label: "Live", color: "bg-red-500 animate-pulse" },
+  error: { label: "Error", color: "bg-red-500" },
+};
+
+function StreamPanel({
+  streamStatus,
+  videoRef,
+  onStartCamera,
+  onStopCamera,
+  onStartStream,
+  onStopStream,
+}: {
+  streamStatus: StreamStatus;
+  videoRef: React.RefObject<HTMLVideoElement | null>;
+  onStartCamera: () => void;
+  onStopCamera: () => void;
+  onStartStream: () => void;
+  onStopStream: () => void;
+}) {
+  const { label, color } = STREAM_STATUS_LABELS[streamStatus];
+  const showVideo = streamStatus !== "idle";
+
+  return (
+    <Card className="py-3">
+      <CardContent className="space-y-3">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <span className={`inline-block h-2 w-2 rounded-full ${color}`} />
+            <span className="text-sm font-medium">{label}</span>
+          </div>
+          <div className="flex items-center gap-2">
+            {streamStatus === "idle" && (
+              <Button size="sm" variant="secondary" onClick={onStartCamera}>
+                Start Camera
+              </Button>
+            )}
+            {streamStatus === "previewing" && (
+              <>
+                <Button size="sm" onClick={onStartStream}>
+                  Go Live
+                </Button>
+                <Button size="sm" variant="ghost" onClick={onStopCamera}>
+                  Stop Camera
+                </Button>
+              </>
+            )}
+            {streamStatus === "connecting" && (
+              <Button size="sm" variant="ghost" disabled>
+                Connecting...
+              </Button>
+            )}
+            {streamStatus === "live" && (
+              <Button size="sm" variant="destructive" onClick={onStopStream}>
+                Stop Stream
+              </Button>
+            )}
+            {streamStatus === "error" && (
+              <Button size="sm" variant="secondary" onClick={onStopCamera}>
+                Reset
+              </Button>
+            )}
+          </div>
+        </div>
+        <video
+          ref={videoRef}
+          autoPlay
+          muted
+          playsInline
+          className={`w-full rounded-lg bg-black ${showVideo ? "aspect-video" : "hidden"}`}
+        />
+      </CardContent>
+    </Card>
   );
 }
 

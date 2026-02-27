@@ -124,3 +124,28 @@ export async function quickGoLive() {
 
   return { auctionId: id, streamProviderId };
 }
+
+export async function getStreamWhipUrl(auctionId: string): Promise<string | null> {
+  const { ctx } = requestInfo;
+  const orgId = ctx.currentOrganization!.id;
+
+  const auction = await db
+    .selectFrom("auctions")
+    .select("streamProviderId")
+    .where("id", "=", auctionId)
+    .where("organizationId", "=", orgId)
+    .executeTakeFirst();
+
+  if (!auction?.streamProviderId) return null;
+
+  const provider = await db
+    .selectFrom("stream_providers")
+    .select("config")
+    .where("id", "=", auction.streamProviderId)
+    .executeTakeFirst();
+
+  if (!provider?.config) return null;
+
+  const config = JSON.parse(provider.config) as { whipUrl?: string };
+  return config.whipUrl ?? null;
+}
