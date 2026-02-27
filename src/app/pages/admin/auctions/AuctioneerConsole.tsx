@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { toast } from "sonner";
 import { Badge } from "@/app/components/ui/badge";
+import { Button } from "@/app/components/ui/button";
 import { Card, CardContent } from "@/app/components/ui/card";
 import type { AuctionsTable, LotsTable } from "@/db";
 import type {
@@ -220,6 +221,8 @@ export function AuctioneerConsole({ auction, initialLots }: AuctioneerConsolePro
         : "bg-red-500";
 
   const isLive = auctionStatus === "live";
+  const isConnected = connectionStatus === "connected";
+  const hasPendingLots = initialLots.some((l) => lots.get(l.id)?.status === "pending");
 
   // ─── Render ─────────────────────────────────────────────────────
 
@@ -283,6 +286,17 @@ export function AuctioneerConsole({ auction, initialLots }: AuctioneerConsolePro
             <div className="flex items-center justify-center h-32 text-muted-foreground text-sm">
               No active lot
             </div>
+          )}
+
+          {currentLot && currentLotState && (
+            <AuctionControlsPanel
+              lotId={currentLot}
+              lotStatus={currentLotState.status}
+              hasBids={currentLotState.bidCount > 0 && currentLotState.currentBidCents != null}
+              hasPendingLots={hasPendingLots}
+              isConnected={isConnected}
+              onSend={sendMessage}
+            />
           )}
 
           <BidFeedPanel entries={bidFeed} />
@@ -396,6 +410,129 @@ function CurrentLotCard({
         </div>
       </CardContent>
     </Card>
+  );
+}
+
+function AuctionControlsPanel({
+  lotId,
+  lotStatus,
+  hasBids,
+  hasPendingLots,
+  isConnected,
+  onSend,
+}: {
+  lotId: string;
+  lotStatus: LotStatus;
+  hasBids: boolean;
+  hasPendingLots: boolean;
+  isConnected: boolean;
+  onSend: (msg: AdminMessage) => void;
+}) {
+  const disabled = !isConnected;
+
+  const showGoingOnce = lotStatus === "active" && hasBids;
+  const showGoingTwice = lotStatus === "going_once";
+  const showSold = (lotStatus === "going_once" || lotStatus === "going_twice" || (lotStatus === "active" && hasBids));
+  const showPass = lotStatus === "active" || lotStatus === "going_once" || lotStatus === "going_twice";
+  const showWithdraw = lotStatus === "active" || lotStatus === "going_once" || lotStatus === "going_twice";
+  const showNextItem = hasPendingLots;
+
+  const isCountdown = lotStatus === "going_once" || lotStatus === "going_twice";
+
+  return (
+    <div className="space-y-3">
+      {isCountdown && (
+        <CountdownBar status={lotStatus} />
+      )}
+
+      <div className="flex flex-wrap items-center gap-2">
+        {showGoingOnce && (
+          <Button
+            disabled={disabled}
+            onClick={() => onSend({ type: "going_once", lotId })}
+            className="bg-yellow-500 text-white hover:bg-yellow-600"
+          >
+            Going Once
+          </Button>
+        )}
+        {showGoingTwice && (
+          <Button
+            disabled={disabled}
+            onClick={() => onSend({ type: "going_twice", lotId })}
+            className="bg-orange-500 text-white hover:bg-orange-600"
+          >
+            Going Twice
+          </Button>
+        )}
+        {showSold && (
+          <Button
+            disabled={disabled}
+            size="lg"
+            onClick={() => onSend({ type: "sold", lotId })}
+            className="bg-green-600 text-white hover:bg-green-700 font-bold text-base"
+          >
+            Sold!
+          </Button>
+        )}
+        {showPass && (
+          <Button
+            variant="secondary"
+            disabled={disabled}
+            onClick={() => onSend({ type: "pass", lotId })}
+          >
+            Pass
+          </Button>
+        )}
+        {showWithdraw && (
+          <Button
+            variant="destructive"
+            size="sm"
+            disabled={disabled}
+            onClick={() => onSend({ type: "withdraw", lotId })}
+          >
+            Withdraw
+          </Button>
+        )}
+
+        {showNextItem && (
+          <Button
+            disabled={disabled}
+            onClick={() => onSend({ type: "advance_lot" })}
+            className="ml-auto"
+          >
+            Next Item
+          </Button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function CountdownBar({ status }: { status: "going_once" | "going_twice" }) {
+  const label = status === "going_once" ? "Going once..." : "Going twice...";
+  const barColor = status === "going_once"
+    ? "bg-yellow-500"
+    : "bg-orange-500";
+
+  return (
+    <div className="space-y-1">
+      <p className="text-sm font-semibold">{label}</p>
+      <div className="h-2 w-full rounded-full bg-muted overflow-hidden">
+        <div
+          key={status}
+          className={`h-full rounded-full ${barColor}`}
+          style={{
+            animation: "countdown-shrink 5s linear forwards",
+          }}
+        />
+      </div>
+      <style>{`
+        @keyframes countdown-shrink {
+          from { width: 100%; }
+          to { width: 0%; }
+        }
+      `}</style>
+    </div>
   );
 }
 
