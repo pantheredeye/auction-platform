@@ -1,72 +1,145 @@
 {
-  "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "auction-platform",
-  "main": "src/worker.tsx",
-  "compatibility_date": "2025-08-21",
-  "compatibility_flags": [
-    "nodejs_compat"
-  ],
-  "assets": {
-    "binding": "ASSETS"
-  },
-  "observability": {
-    "enabled": true
-  },
-  "d1_databases": [
-    {
-      "binding": "DB",
-      "database_name": "auction-platform-db",
-      "database_id": "fac825c5-719f-4c36-8628-907fd6818869"
-    }
-  ],
-  "durable_objects": {
-    "bindings": [
-      {
-        "name": "SESSION_DURABLE_OBJECT",
-        "class_name": "SessionDurableObject"
-      },
-      {
-        "name": "AUCTION_ROOM",
-        "class_name": "AuctionRoomDO"
-      }
-    ]
-  },
-  "migrations": [
-    {
-      "tag": "v1",
-      "new_sqlite_classes": [
-        "SessionDurableObject",
-        "AuctionRoomDO"
-      ]
-    }
-  ],
-  "routes": [
-    {
-      "pattern": "auction.digitalglue.dev",
-      "custom_domain": true
-    }
-  ],
-  "r2_buckets": [
-    {
-      "binding": "IMAGES",
-      "bucket_name": "auction-platform-images"
-    }
-  ],
-  "queues": {
-    "producers": [
-      {
-        "binding": "IMPORT_QUEUE",
-        "queue": "auction-import-queue"
-      }
-    ],
-    "consumers": [
-      {
-        "queue": "auction-import-queue"
-      }
-    ]
-  },
-  "vars": {
-    "WEBAUTHN_APP_NAME": "auction-platform",
-    "WEBAUTHN_RP_ID": "auction.digitalglue.dev"
-  }
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "auction-platform",
+	"main": "src/worker.tsx",
+	"compatibility_date": "2025-08-21",
+	"compatibility_flags": [
+		"nodejs_compat"
+	],
+	"assets": {
+		"binding": "ASSETS"
+	},
+	"observability": {
+		"enabled": true
+	},
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "auction-platform-db",
+			"database_id": "fac825c5-719f-4c36-8628-907fd6818869"
+		}
+	],
+	"durable_objects": {
+		"bindings": [
+			{
+				"name": "SESSION_DURABLE_OBJECT",
+				"class_name": "SessionDurableObject"
+			},
+			{
+				"name": "AUCTION_ROOM",
+				"class_name": "AuctionRoomDO"
+			}
+		]
+	},
+	"migrations": [
+		{
+			"tag": "v1",
+			"new_sqlite_classes": [
+				"SessionDurableObject",
+				"AuctionRoomDO"
+			]
+		}
+	],
+	"routes": [
+		{
+			"pattern": "auction.digitalglue.dev",
+			"custom_domain": true
+		}
+	],
+	"r2_buckets": [
+		{
+			"binding": "IMAGES",
+			"bucket_name": "auction-platform-images"
+		}
+	],
+	"queues": {
+		"producers": [
+			{
+				"binding": "IMPORT_QUEUE",
+				"queue": "auction-import-queue"
+			},
+			{
+				"binding": "BID_EVENTS_QUEUE",
+				"queue": "auction-bid-events"
+			}
+		],
+		"consumers": [
+			{
+				"queue": "auction-import-queue"
+			},
+			{
+				"queue": "auction-bid-events",
+				"max_batch_size": 50,
+				"max_batch_timeout": 5,
+				"max_retries": 5
+			}
+		]
+	},
+	"vars": {
+		"WEBAUTHN_APP_NAME": "auction-platform",
+		"WEBAUTHN_RP_ID": "auction.digitalglue.dev"
+	},
+	"env": {
+		"staging": {
+			"name": "auction-platform-staging",
+			"durable_objects": {
+				"bindings": [
+					{
+						"name": "SESSION_DURABLE_OBJECT",
+						"class_name": "SessionDurableObject"
+					},
+					{
+						"name": "AUCTION_ROOM",
+						"class_name": "AuctionRoomDO"
+					}
+				]
+			},
+			"d1_databases": [
+				{
+					"binding": "DB",
+					"database_name": "auction-platform-db-staging",
+					"database_id": "0999db0a-645c-443f-a210-92b94966e7ec"
+				}
+			],
+			"r2_buckets": [
+				{
+					"binding": "IMAGES",
+					"bucket_name": "auction-platform-images-staging"
+				}
+			],
+			"queues": {
+				"producers": [
+					{
+						"binding": "IMPORT_QUEUE",
+						"queue": "auction-import-queue-staging"
+					},
+					{
+						"binding": "BID_EVENTS_QUEUE",
+						"queue": "auction-bid-events-staging"
+					}
+				],
+				"consumers": [
+					{
+						"queue": "auction-import-queue-staging"
+					},
+					{
+						"queue": "auction-bid-events-staging",
+						"max_batch_size": 50,
+						"max_batch_timeout": 5,
+						"max_retries": 5
+					}
+				]
+			},
+			"routes": [
+				{
+					"pattern": "staging-auction.digitalglue.dev",
+					"custom_domain": true
+				}
+			],
+			"vars": {
+				"WEBAUTHN_APP_NAME": "auction-platform",
+				"WEBAUTHN_RP_ID": "staging-auction.digitalglue.dev"
+			}
+		}
+	}
 }
