@@ -56,9 +56,9 @@ export function AuctionRoomClient({
 }: AuctionRoomClientProps) {
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>("disconnected");
   const [auctionStatus, setAuctionStatus] = useState<AuctionStatus>(auction.status as AuctionStatus);
-  const [currentLot, setCurrentLot] = useState<{ id: string; lotNumber: number; title: string; startingPriceCents: number; thumbnailUrl: string | null } | null>(
+  const [currentLot, setCurrentLot] = useState<{ id: string; lotNumber: number; title: string; description: string; startingPriceCents: number; thumbnailUrl: string | null } | null>(
     initialActiveLot
-      ? { id: initialActiveLot.id, lotNumber: initialActiveLot.lotNumber, title: initialActiveLot.title, startingPriceCents: initialActiveLot.startingPriceCents, thumbnailUrl: initialActiveLot.thumbnailUrl }
+      ? { id: initialActiveLot.id, lotNumber: initialActiveLot.lotNumber, title: initialActiveLot.title, description: initialActiveLot.description ?? "", startingPriceCents: initialActiveLot.startingPriceCents, thumbnailUrl: initialActiveLot.thumbnailUrl }
       : null,
   );
   const [currentLotState, setCurrentLotState] = useState<LotDynamic | null>(
@@ -70,6 +70,8 @@ export function AuctionRoomClient({
   const [viewerCount, setViewerCount] = useState(0);
   const [chatMessages, setChatMessages] = useState<ChatMsg[]>([]);
   const [myLastBidLotId, setMyLastBidLotId] = useState<string | null>(null);
+  const [bidInFlight, setBidInFlight] = useState(false);
+  const [soldOverlay, setSoldOverlay] = useState(false);
 
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectAttempt = useRef(0);
@@ -111,13 +113,34 @@ export function AuctionRoomClient({
         // Active lot tracking
         if (msg.status === "active" || msg.status === "going_once" || msg.status === "going_twice") {
           setCurrentLotState(dynamic);
-          // Update current lot if it's a new lot
+          setSoldOverlay(false);
+          // Update current lot if it's a new lot — pull from upcomingLots for full info
           setCurrentLot((prev) => {
             if (prev?.id === msg.lotId) return prev;
-            // New active lot — we may not have full info, use what we have
-            return { id: msg.lotId, lotNumber: 0, title: "", startingPriceCents: 0, thumbnailUrl: null };
+            return null; // will be resolved below
           });
-        } else if (msg.status === "sold" || msg.status === "passed" || msg.status === "withdrawn") {
+          setUpcomingLots((prev) => {
+            const found = prev.find((l) => l.id === msg.lotId);
+            if (found) {
+              setCurrentLot({ id: found.id, lotNumber: found.lotNumber, title: found.title, description: found.description ?? "", startingPriceCents: found.startingPriceCents, thumbnailUrl: found.thumbnailUrl });
+            } else {
+              setCurrentLot((cur) => cur ?? { id: msg.lotId, lotNumber: 0, title: "", description: "", startingPriceCents: 0, thumbnailUrl: null });
+            }
+            return prev;
+          });
+        } else if (msg.status === "sold") {
+          // Show sold overlay for 3s before clearing
+          setCurrentLotState(dynamic);
+          setSoldOverlay(true);
+          setTimeout(() => {
+            setSoldOverlay(false);
+            setCurrentLot((prev) => (prev?.id === msg.lotId ? null : prev));
+            setCurrentLotState((prev) => {
+              if (lotsRef.current.get(msg.lotId) === prev) return null;
+              return prev;
+            });
+          }, 3000);
+        } else if (msg.status === "passed" || msg.status === "withdrawn") {
           // Lot finished — clear if it was the current one
           setCurrentLot((prev) => (prev?.id === msg.lotId ? null : prev));
           setCurrentLotState((prev) => {
@@ -139,12 +162,14 @@ export function AuctionRoomClient({
 
       case "bid_accepted":
         if (msg.userId === userId) {
+          setBidInFlight(false);
           setMyLastBidLotId(msg.lotId);
           toast.success(`Bid placed: ${formatCents(msg.amountCents)}`);
         }
         break;
 
       case "bid_rejected":
+        setBidInFlight(false);
         toast.error(`Bid rejected: ${msg.reason}`);
         break;
 
@@ -236,14 +261,15 @@ export function AuctionRoomClient({
     : (currentLot?.startingPriceCents ?? 0);
 
   const handleBid = useCallback(() => {
-    if (!currentLot) return;
+    if (!currentLot || bidInFlight) return;
+    setBidInFlight(true);
     sendMessage({
       type: "bid",
       lotId: currentLot.id,
       amountCents: nextBidCents,
       idempotencyKey: crypto.randomUUID(),
     });
-  }, [currentLot, nextBidCents, sendMessage]);
+  }, [currentLot, nextBidCents, sendMessage, bidInFlight]);
 
   // ─── Derived state ────────────────────────────────────────────────
 
@@ -289,6 +315,17 @@ export function AuctionRoomClient({
           </div>
         </div>
       </header>
+
+      {/* Going once / Going twice / Sold overlays */}
+      {currentLotState?.status === "going_once" && (
+        <AuctionOverlay variant="going_once" />
+      )}
+      {currentLotState?.status === "going_twice" && (
+        <AuctionOverlay variant="going_twice" />
+      )}
+      {soldOverlay && (
+        <AuctionOverlay variant="sold" />
+      )}
 
       {/* Main content: mobile stack / desktop side-by-side */}
       <div className="flex-1 flex flex-col md:flex-row overflow-hidden">
@@ -367,33 +404,39 @@ export function AuctionRoomClient({
         </aside>
       </div>
 
-      {/* Sticky bottom bid bar */}
-      {isLotActive && currentLot && (
-        <div className="border-t bg-background px-4 py-3 flex items-center gap-3 shrink-0">
-          <div className="flex-1 min-w-0">
-            <p className="text-xs text-muted-foreground">
-              {hasBids ? "Current bid" : "Starting at"}
-            </p>
-            <p className="text-lg font-bold tabular-nums">
-              {hasBids ? formatCents(currentLotState!.currentBidCents!) : formatCents(currentLot.startingPriceCents)}
-            </p>
+      {/* Sticky bottom bid bar — always visible */}
+      <div className="border-t bg-background px-4 py-3 shrink-0">
+        {isLotActive && currentLot ? (
+          <div className="flex items-center gap-3">
+            <div className="flex-1 min-w-0">
+              <p className="text-xs text-muted-foreground">
+                {hasBids ? "Current bid" : "Starting at"}
+              </p>
+              <p className="text-lg font-bold tabular-nums">
+                {hasBids ? formatCents(currentLotState!.currentBidCents!) : formatCents(currentLot.startingPriceCents)}
+              </p>
+            </div>
+            {isHighBidder ? (
+              <Button size="lg" disabled className="font-bold text-base px-8 w-full sm:w-auto">
+                You are the highest bidder
+              </Button>
+            ) : (
+              <Button
+                size="lg"
+                disabled={!isConnected || bidInFlight}
+                onClick={handleBid}
+                className="font-bold text-base px-8 w-full sm:w-auto bg-green-600 hover:bg-green-700 min-h-[3rem]"
+              >
+                {bidInFlight ? "Placing bid..." : `Bid ${formatCents(nextBidCents)}`}
+              </Button>
+            )}
           </div>
-          {isHighBidder ? (
-            <Badge variant="outline" className="text-green-600 border-green-300 px-4 py-2">
-              You're the high bidder
-            </Badge>
-          ) : (
-            <Button
-              size="lg"
-              disabled={!isConnected}
-              onClick={handleBid}
-              className="font-bold text-base px-8"
-            >
-              Bid {formatCents(nextBidCents)}
-            </Button>
-          )}
-        </div>
-      )}
+        ) : (
+          <Button size="lg" disabled className="w-full font-bold text-base min-h-[3rem]">
+            Waiting for next item
+          </Button>
+        )}
+      </div>
     </div>
   );
 }
@@ -405,7 +448,7 @@ function CurrentLotCard({
   state,
   isHighBidder,
 }: {
-  lot: { id: string; lotNumber: number; title: string; startingPriceCents: number; thumbnailUrl: string | null };
+  lot: { id: string; lotNumber: number; title: string; description: string; startingPriceCents: number; thumbnailUrl: string | null };
   state: LotDynamic;
   isHighBidder: boolean;
 }) {
@@ -414,7 +457,7 @@ function CurrentLotCard({
   return (
     <Card className="py-3">
       <CardContent className="flex gap-4">
-        <div className="w-20 h-20 flex-shrink-0 rounded-lg overflow-hidden bg-muted flex items-center justify-center">
+        <div className="w-24 h-24 flex-shrink-0 rounded-lg overflow-hidden bg-muted flex items-center justify-center">
           {lot.thumbnailUrl ? (
             <img src={imageUrl(lot.thumbnailUrl)} alt={lot.title} className="w-full h-full object-cover" />
           ) : (
@@ -423,16 +466,19 @@ function CurrentLotCard({
         </div>
         <div className="flex-1 min-w-0 space-y-1">
           <div className="flex items-start justify-between gap-2">
-            <div>
+            <div className="min-w-0">
               {lot.lotNumber > 0 && <p className="text-xs text-muted-foreground">Lot #{lot.lotNumber}</p>}
-              <h2 className="text-lg font-bold leading-tight truncate">{lot.title}</h2>
+              <h2 className="text-xl font-bold leading-tight truncate">{lot.title}</h2>
+              {lot.description && (
+                <p className="text-sm text-muted-foreground line-clamp-2 mt-0.5">{lot.description}</p>
+              )}
             </div>
             <LotStatusBadge status={state.status} />
           </div>
           <div className="flex items-baseline gap-4">
             <div>
               <p className="text-xs text-muted-foreground">{hasBids ? "Current bid" : "Starting price"}</p>
-              <p className="text-2xl font-bold tabular-nums">
+              <p className="text-3xl font-bold tabular-nums">
                 {hasBids ? formatCents(state.currentBidCents!) : formatCents(lot.startingPriceCents)}
               </p>
             </div>
@@ -486,6 +532,39 @@ function CountdownBar({ status }: { status: "going_once" | "going_twice" }) {
         @keyframes countdown-shrink {
           from { width: 100%; }
           to { width: 0%; }
+        }
+      `}</style>
+    </div>
+  );
+}
+
+function AuctionOverlay({ variant }: { variant: "going_once" | "going_twice" | "sold" }) {
+  const config = {
+    going_once: { text: "Going Once!", bg: "bg-yellow-500/90", animation: "animate-pulse" },
+    going_twice: { text: "Going Twice!", bg: "bg-orange-500/90", animation: "auction-fast-pulse" },
+    sold: { text: "SOLD!", bg: "bg-green-600/90", animation: "auction-celebrate" },
+  }[variant];
+
+  return (
+    <div className={`fixed inset-x-0 top-16 z-50 flex items-center justify-center pointer-events-none`}>
+      <div className={`${config.bg} text-white font-black text-2xl sm:text-3xl py-3 px-8 rounded-b-xl shadow-lg ${config.animation}`}>
+        {config.text}
+      </div>
+      <style>{`
+        .auction-fast-pulse {
+          animation: auction-pulse 0.5s ease-in-out infinite;
+        }
+        .auction-celebrate {
+          animation: auction-pop 0.6s ease-out;
+        }
+        @keyframes auction-pulse {
+          0%, 100% { opacity: 1; transform: scale(1); }
+          50% { opacity: 0.85; transform: scale(1.05); }
+        }
+        @keyframes auction-pop {
+          0% { opacity: 0; transform: scale(0.5); }
+          60% { transform: scale(1.15); }
+          100% { opacity: 1; transform: scale(1); }
         }
       `}</style>
     </div>
