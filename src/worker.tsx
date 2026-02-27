@@ -1,5 +1,6 @@
 import { render, route, layout, prefix } from "rwsdk/router";
 import { defineApp } from "rwsdk/worker";
+import { env } from "cloudflare:workers";
 
 import { Document } from "@/app/Document";
 import { setCommonHeaders } from "@/app/headers";
@@ -141,6 +142,38 @@ const app = defineApp([
         }
       }
     }
+  },
+
+  // WebSocket upgrade: /ws/auction/:id → AuctionRoomDO
+  async ({ request, ctx }) => {
+    const url = new URL(request.url);
+    const wsMatch = url.pathname.match(/^\/ws\/auction\/([^/]+)$/);
+    if (!wsMatch || request.headers.get("Upgrade") !== "websocket") {
+      return; // fall through to render
+    }
+
+    if (!ctx.user) {
+      return new Response("Unauthorized", { status: 401 });
+    }
+
+    const auctionId = wsMatch[1];
+    const isAdmin =
+      ctx.currentOrganization?.role === "super_admin" ||
+      ctx.currentOrganization?.role === "admin" ||
+      ctx.currentOrganization?.role === "auctioneer";
+
+    const doId = env.AUCTION_ROOM.idFromName(auctionId);
+    const stub = env.AUCTION_ROOM.get(doId);
+
+    const doRequest = new Request(request.url, {
+      method: request.method,
+      headers: new Headers(request.headers),
+    });
+    doRequest.headers.set("X-User-Id", ctx.user.id);
+    doRequest.headers.set("X-Username", ctx.user.displayName ?? ctx.user.name ?? ctx.user.username);
+    doRequest.headers.set("X-Is-Admin", String(isAdmin));
+
+    return stub.fetch(doRequest);
   },
 
   render(Document, [
