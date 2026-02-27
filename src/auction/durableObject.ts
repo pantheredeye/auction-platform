@@ -190,6 +190,58 @@ export class AuctionRoomDO extends DurableObject<Cloudflare.Env> {
     return new Response(null, { status: 101, webSocket: client });
   }
 
+  // ─── Alarm handler (lot countdown) ────────────────────────────
+
+  async alarm() {
+    await this.ensureState();
+
+    const lot = this.state.currentLotId
+      ? this.state.lots.get(this.state.currentLotId)
+      : null;
+
+    // Race guard: lot was reset to active (anti-snipe) before alarm fired
+    if (!lot || (lot.status !== "going_once" && lot.status !== "going_twice")) {
+      return;
+    }
+
+    if (lot.status === "going_once") {
+      lot.status = "going_twice";
+      lot.sequence++;
+      await this.persistState();
+      this.broadcast({
+        type: "lot_update",
+        lotId: lot.id,
+        status: lot.status,
+        currentBidCents: lot.currentBidCents,
+        currentBidderId: lot.currentBidderId,
+        bidCount: lot.bidCount,
+      });
+      // Set alarm for sold/passed transition
+      await this.ctx.storage.setAlarm(Date.now() + 5000);
+      return;
+    }
+
+    if (lot.status === "going_twice") {
+      // Determine sold vs passed
+      if (lot.bidCount > 0 && lot.currentBidderId) {
+        lot.status = "sold";
+      } else {
+        lot.status = "passed";
+      }
+      lot.sequence++;
+      await this.persistState();
+      await this.flushBidBuffer();
+      this.broadcast({
+        type: "lot_update",
+        lotId: lot.id,
+        status: lot.status,
+        currentBidCents: lot.currentBidCents,
+        currentBidderId: lot.currentBidderId,
+        bidCount: lot.bidCount,
+      });
+    }
+  }
+
   // ─── Hibernation handlers ──────────────────────────────────────
 
   async webSocketClose(ws: WebSocket, code: number, reason: string) {
@@ -330,6 +382,11 @@ export class AuctionRoomDO extends DurableObject<Cloudflare.Env> {
       createdAt: new Date().toISOString(),
     });
 
+    // Flush buffer if it reaches 10 events
+    if (this.bidBuffer.length >= 10) {
+      this.flushBidBuffer();
+    }
+
     // Persist updated state
     this.persistState();
 
@@ -407,6 +464,16 @@ export class AuctionRoomDO extends DurableObject<Cloudflare.Env> {
       type: "viewer_count",
       count: this.state.viewerCount,
     });
+  }
+
+  // ─── Buffer flush ─────────────────────────────────────────────
+
+  private async flushBidBuffer() {
+    if (this.bidBuffer.length === 0) return;
+    await this.env.BID_EVENTS_QUEUE.sendBatch(
+      this.bidBuffer.map((event) => ({ body: event })),
+    );
+    this.bidBuffer = [];
   }
 
   // ─── State persistence & recovery ──────────────────────────────
