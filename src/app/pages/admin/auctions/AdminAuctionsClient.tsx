@@ -36,6 +36,7 @@ import {
   Copy,
   Trash2,
   ArrowRight,
+  Radio,
 } from "lucide-react";
 import {
   listAuctions,
@@ -43,6 +44,7 @@ import {
   transitionAuctionStatus,
 } from "./server-functions/auctions";
 import { cloneAuction } from "./server-functions/clone";
+import { quickGoLive } from "./server-functions/go-live";
 
 interface Auction {
   id: string;
@@ -158,6 +160,17 @@ export function AdminAuctionsClient({
     });
   }
 
+  function handleGoLive() {
+    startTransition(async () => {
+      try {
+        const result = await quickGoLive();
+        window.location.href = `/admin/auctions/${result.auctionId}/auctioneer`;
+      } catch (e: any) {
+        setError(e.message);
+      }
+    });
+  }
+
   function handleDelete(id: string) {
     if (!confirm("Delete this draft auction?")) return;
     startTransition(async () => {
@@ -174,11 +187,22 @@ export function AdminAuctionsClient({
     <div>
       <div className="flex items-center justify-between mb-4">
         <h1 className="text-2xl font-bold">Auctions</h1>
-        <a href="/admin/auctions/new">
-          <Button size="sm">
-            <Plus size={16} /> New Auction
+        <div className="flex gap-2">
+          <Button
+            size="sm"
+            variant="default"
+            onClick={handleGoLive}
+            disabled={isPending}
+            className="bg-green-600 hover:bg-green-700"
+          >
+            <Radio size={16} /> Go Live Now
           </Button>
-        </a>
+          <a href="/admin/auctions/new">
+            <Button size="sm" variant="outline">
+              <Plus size={16} /> New Auction
+            </Button>
+          </a>
+        </div>
       </div>
 
       {error && (
@@ -282,6 +306,13 @@ export function AdminAuctionsClient({
                             <ListOrdered size={14} /> Lots
                           </a>
                         </DropdownMenuItem>
+                        {auction.status === "live" && (
+                          <DropdownMenuItem asChild>
+                            <a href={`/admin/auctions/${auction.id}/auctioneer`}>
+                              <Radio size={14} /> Control Room
+                            </a>
+                          </DropdownMenuItem>
+                        )}
                         <DropdownMenuItem
                           onClick={() => handleClone(auction.id)}
                         >
