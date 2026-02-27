@@ -7,6 +7,12 @@ import { Badge } from "@/app/components/ui/badge";
 import { Button } from "@/app/components/ui/button";
 import { Card, CardContent } from "@/app/components/ui/card";
 import { Input } from "@/app/components/ui/input";
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+} from "@/app/components/ui/sheet";
 import type { AuctionsTable, LotsTable } from "@/db";
 import type {
   ServerMessage,
@@ -16,6 +22,7 @@ import type {
 } from "@/auction/types";
 import { formatCents } from "@/lib/money";
 import { imageUrl } from "@/lib/image-url";
+import { Eye, MessageCircle } from "lucide-react";
 
 // ─── Types ──────────────────────────────────────────────────────────
 
@@ -72,6 +79,8 @@ export function AuctionRoomClient({
   const [myLastBidLotId, setMyLastBidLotId] = useState<string | null>(null);
   const [bidInFlight, setBidInFlight] = useState(false);
   const [soldOverlay, setSoldOverlay] = useState(false);
+  const [chatOpen, setChatOpen] = useState(false);
+  const [unreadCount, setUnreadCount] = useState(0);
 
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectAttempt = useRef(0);
@@ -80,6 +89,9 @@ export function AuctionRoomClient({
 
   // Track all known lots for state updates
   const lotsRef = useRef<Map<string, LotDynamic>>(new Map());
+  const chatEndRef = useRef<HTMLDivElement | null>(null);
+  const chatOpenRef = useRef(chatOpen);
+  chatOpenRef.current = chatOpen;
 
   const sendMessage = useCallback((msg: ClientMessage) => {
     const ws = wsRef.current;
@@ -177,6 +189,10 @@ export function AuctionRoomClient({
         setChatMessages((prev) =>
           [...prev, { id: msg.id, userId: msg.userId, username: msg.username, content: msg.content, createdAt: msg.createdAt }].slice(-100),
         );
+        // Increment unread on mobile when chat sheet is closed
+        if (!chatOpenRef.current && typeof window !== "undefined" && window.innerWidth < 768) {
+          setUnreadCount((c) => c + 1);
+        }
         break;
 
       case "viewer_count":
@@ -254,6 +270,12 @@ export function AuctionRoomClient({
     };
   }, [auction.id, handleServerMessage]);
 
+  // ─── Auto-scroll chat ────────────────────────────────────────────
+
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [chatMessages]);
+
   // ─── Bid handling ─────────────────────────────────────────────────
 
   const nextBidCents = currentLotState?.currentBidCents != null
@@ -310,8 +332,9 @@ export function AuctionRoomClient({
             <span className={`inline-block h-2 w-2 rounded-full ${statusDot}`} />
             <span className="hidden sm:inline">{connectionStatus}</span>
           </div>
-          <div className="text-sm text-muted-foreground">
-            {viewerCount} viewer{viewerCount !== 1 ? "s" : ""}
+          <div className="flex items-center gap-1 text-sm text-muted-foreground">
+            <Eye className="h-4 w-4" />
+            <span>{viewerCount}</span>
           </div>
         </div>
       </header>
@@ -360,7 +383,7 @@ export function AuctionRoomClient({
             {/* Upcoming lots */}
             {upcomingLots.length > 0 && (
               <div className="space-y-1">
-                <h3 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Up next</h3>
+                <h3 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Coming Up</h3>
                 <div className="flex gap-2 overflow-x-auto pb-1">
                   {upcomingLots.slice(0, 5).map((lot) => (
                     <div key={lot.id} className="shrink-0 w-28 p-2 border rounded-lg text-center">
@@ -381,28 +404,50 @@ export function AuctionRoomClient({
           </div>
         </div>
 
-        {/* Right: Chat panel (desktop: 40%, mobile: below) */}
-        <aside className="md:w-2/5 border-t md:border-t-0 md:border-l flex flex-col overflow-hidden">
-          <div className="flex items-center justify-between px-4 py-2 border-b">
-            <h2 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Chat</h2>
-            <span className="text-xs text-muted-foreground">{viewerCount} watching</span>
-          </div>
-          <div className="flex-1 overflow-y-auto p-3 space-y-2">
-            {chatMessages.length === 0 && (
-              <p className="text-xs text-muted-foreground text-center py-4">No messages yet</p>
-            )}
-            {chatMessages.map((msg) => (
-              <div key={msg.id} className="text-sm">
-                <span className={`font-medium text-xs ${msg.userId === userId ? "text-primary" : ""}`}>
-                  {msg.username}
-                </span>
-                <p className="text-xs text-muted-foreground">{msg.content}</p>
-              </div>
-            ))}
-          </div>
-          <ChatInput isConnected={isConnected} onSend={(content) => sendMessage({ type: "chat", content })} />
+        {/* Right: Chat panel — always visible on desktop (md+) */}
+        <aside className="hidden md:flex md:w-2/5 border-l flex-col overflow-hidden">
+          <ChatPanel
+            chatMessages={chatMessages}
+            viewerCount={viewerCount}
+            userId={userId}
+            isConnected={isConnected}
+            onSend={(content) => sendMessage({ type: "chat", content })}
+            chatEndRef={chatEndRef}
+          />
         </aside>
+
+        {/* Mobile: Sheet-based chat drawer */}
+        <Sheet open={chatOpen} onOpenChange={(open) => { setChatOpen(open); if (open) setUnreadCount(0); }}>
+          <SheetContent side="right" showCloseButton={false} className="w-full sm:max-w-md p-0 flex flex-col md:hidden">
+            <SheetHeader className="px-4 py-2 border-b">
+              <SheetTitle className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Chat</SheetTitle>
+            </SheetHeader>
+            <ChatPanel
+              chatMessages={chatMessages}
+              viewerCount={viewerCount}
+              userId={userId}
+              isConnected={isConnected}
+              onSend={(content) => sendMessage({ type: "chat", content })}
+              chatEndRef={chatEndRef}
+            />
+          </SheetContent>
+        </Sheet>
       </div>
+
+      {/* Mobile chat toggle button */}
+      <Button
+        variant="outline"
+        size="icon"
+        className="fixed bottom-20 right-4 z-40 h-12 w-12 rounded-full shadow-lg md:hidden"
+        onClick={() => { setChatOpen(true); setUnreadCount(0); }}
+      >
+        <MessageCircle className="h-5 w-5" />
+        {unreadCount > 0 && (
+          <span className="absolute -top-1 -right-1 bg-destructive text-destructive-foreground text-[10px] font-bold rounded-full h-5 min-w-5 flex items-center justify-center px-1">
+            {unreadCount > 99 ? "99+" : unreadCount}
+          </span>
+        )}
+      </Button>
 
       {/* Sticky bottom bid bar — always visible */}
       <div className="border-t bg-background px-4 py-3 shrink-0">
@@ -568,6 +613,46 @@ function AuctionOverlay({ variant }: { variant: "going_once" | "going_twice" | "
         }
       `}</style>
     </div>
+  );
+}
+
+function ChatPanel({
+  chatMessages,
+  viewerCount,
+  userId,
+  isConnected,
+  onSend,
+  chatEndRef,
+}: {
+  chatMessages: ChatMsg[];
+  viewerCount: number;
+  userId: string;
+  isConnected: boolean;
+  onSend: (content: string) => void;
+  chatEndRef: React.RefObject<HTMLDivElement | null>;
+}) {
+  return (
+    <>
+      <div className="flex items-center justify-between px-4 py-2 border-b">
+        <h2 className="text-xs font-medium text-muted-foreground uppercase tracking-wide hidden md:block">Chat</h2>
+        <span className="text-xs text-muted-foreground">{viewerCount} watching</span>
+      </div>
+      <div className="flex-1 overflow-y-auto p-3 space-y-2">
+        {chatMessages.length === 0 && (
+          <p className="text-xs text-muted-foreground text-center py-4">No messages yet</p>
+        )}
+        {chatMessages.map((msg) => (
+          <div key={msg.id} className="text-sm">
+            <span className={`font-medium text-xs ${msg.userId === userId ? "text-primary" : ""}`}>
+              {msg.username}
+            </span>
+            <p className="text-xs text-muted-foreground">{msg.content}</p>
+          </div>
+        ))}
+        <div ref={chatEndRef} />
+      </div>
+      <ChatInput isConnected={isConnected} onSend={onSend} />
+    </>
   );
 }
 
