@@ -35,6 +35,11 @@ import { AdminImportPage } from "@/app/pages/admin/catalog/AdminImportPage";
 import { AdminAuctionsPage } from "@/app/pages/admin/auctions/AdminAuctionsPage";
 import { AdminAuctionFormPage } from "@/app/pages/admin/auctions/AdminAuctionFormPage";
 import { AdminLotsPage } from "@/app/pages/admin/auctions/AdminLotsPage";
+import { AuctioneerPage } from "@/app/pages/admin/auctions/AuctioneerPage";
+
+// Auction pages (buyer-facing)
+import { AuctionsListPage } from "@/app/pages/auctions/AuctionsListPage";
+import { AuctionRoomPage } from "@/app/pages/auctions/AuctionRoomPage";
 
 // Queue consumers
 import { processShopifyImport } from "@/queue/shopify-import";
@@ -181,7 +186,8 @@ const app = defineApp([
     ...prefix("/auth", layout(PublicLayout, authRoutes)),
     ...layout(AuthenticatedLayout, [
       route("/dashboard", [requireAuth, Dashboard]),
-      route("/auctions", [requireAuth, Placeholder]),
+      route("/auctions", [requireAuth, AuctionsListPage]),
+      route("/auctions/:slug/live", [requireAuth, AuctionRoomPage]),
       ...prefix("/my", [
         route("/bids", [requireAuth, Placeholder]),
         route("/invoices", [requireAuth, Placeholder]),
@@ -201,6 +207,7 @@ const app = defineApp([
         route("/auctions/new", [requireAdmin, AdminAuctionFormPage]),
         route("/auctions/:id/edit", [requireAdmin, AdminAuctionFormPage]),
         route("/auctions/:id/lots", [requireEmployee, AdminLotsPage]),
+        route("/auctions/:id/auctioneer", [requireEmployee, AuctioneerPage]),
       ]),
     ),
     ...prefix(
