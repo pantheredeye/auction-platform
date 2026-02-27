@@ -14,7 +14,7 @@ const AUCTION_TRANSITIONS: Record<AuctionStatus, AuctionStatus[]> = {
 const LOT_TRANSITIONS: Record<LotStatus, LotStatus[]> = {
   pending: ["active"],
   active: ["going_once", "sold", "passed", "withdrawn"],
-  going_once: ["going_twice", "active", "passed", "withdrawn"],
+  going_once: ["going_twice", "sold", "active", "passed", "withdrawn"],
   going_twice: ["sold", "active", "passed", "withdrawn"],
   sold: [],
   passed: [],

@@ -3,6 +3,7 @@ import { Kysely } from "kysely";
 import { D1Dialect } from "kysely-d1";
 import type { AppDatabase } from "@/db";
 import type {
+  AdminMessage,
   AuctionRoomState,
   BufferedBidEvent,
   ClientMessage,
@@ -11,6 +12,13 @@ import type {
   IncrementRule,
 } from "./types";
 import { resolveIncrement, validateBidAmount } from "./increments";
+import { canTransitionLot, canTransitionAuction } from "./state-machine";
+
+const ADMIN_MESSAGE_TYPES = new Set([
+  "advance_lot", "going_once", "going_twice", "sold",
+  "pass", "withdraw", "floor_bid", "start_auction",
+  "close_auction", "quick_add_lot",
+]);
 
 // ─── Socket attachment ──────────────────────────────────────────────
 
@@ -270,18 +278,22 @@ export class AuctionRoomDO extends DurableObject<Cloudflare.Env> {
   async webSocketMessage(ws: WebSocket, message: string | ArrayBuffer) {
     await this.ensureState();
 
-    let parsed: ClientMessage;
+    let parsed: Record<string, unknown>;
     try {
       parsed = JSON.parse(
         typeof message === "string" ? message : new TextDecoder().decode(message),
-      ) as ClientMessage;
+      ) as Record<string, unknown>;
     } catch {
       this.sendToSocket(ws, { type: "error", message: "Invalid JSON" });
       return;
     }
 
-    if (parsed.type === "bid") {
-      this.handleBid(ws, parsed);
+    const { type } = parsed;
+
+    if (type === "bid") {
+      this.handleBid(ws, parsed as unknown as ClientMessage & { type: "bid" });
+    } else if (ADMIN_MESSAGE_TYPES.has(type as string)) {
+      await this.handleAdminMessage(ws, parsed as unknown as AdminMessage);
     }
     // Other message types (chat, etc.) handled by future epics
   }
@@ -410,7 +422,257 @@ export class AuctionRoomDO extends DurableObject<Cloudflare.Env> {
     });
   }
 
+  // ─── Admin message handling ──────────────────────────────────────
+
+  private async handleAdminMessage(ws: WebSocket, msg: AdminMessage) {
+    const attachment = ws.deserializeAttachment() as SocketAttachment | null;
+    if (!attachment?.isAdmin) {
+      this.sendToSocket(ws, { type: "error", message: "Admin access required" });
+      return;
+    }
+
+    switch (msg.type) {
+      case "going_once":
+        await this.handleGoingOnce(ws, msg.lotId);
+        break;
+      case "going_twice":
+        await this.handleGoingTwice(ws, msg.lotId);
+        break;
+      case "sold":
+        await this.handleSold(ws, msg.lotId);
+        break;
+      case "pass":
+        await this.handlePass(ws, msg.lotId);
+        break;
+      case "withdraw":
+        await this.handleWithdraw(ws, msg.lotId);
+        break;
+      case "advance_lot":
+        await this.handleAdvanceLot(ws);
+        break;
+      case "start_auction":
+        await this.handleStartAuction(ws);
+        break;
+      case "close_auction":
+        await this.handleCloseAuction(ws);
+        break;
+      default:
+        this.sendToSocket(ws, { type: "error", message: "Unknown admin command" });
+    }
+  }
+
+  private async handleGoingOnce(ws: WebSocket, lotId: string) {
+    const lot = this.state.lots.get(lotId);
+    if (!lot) {
+      this.sendToSocket(ws, { type: "error", message: "Lot not found" });
+      return;
+    }
+    if (!canTransitionLot(lot.status, "going_once")) {
+      this.sendToSocket(ws, { type: "error", message: `Cannot go going_once from ${lot.status}` });
+      return;
+    }
+    lot.status = "going_once";
+    lot.sequence++;
+    await this.persistState();
+    await this.ctx.storage.setAlarm(Date.now() + 5000);
+    this.broadcastLotUpdate(lot);
+  }
+
+  private async handleGoingTwice(ws: WebSocket, lotId: string) {
+    const lot = this.state.lots.get(lotId);
+    if (!lot) {
+      this.sendToSocket(ws, { type: "error", message: "Lot not found" });
+      return;
+    }
+    if (!canTransitionLot(lot.status, "going_twice")) {
+      this.sendToSocket(ws, { type: "error", message: `Cannot go going_twice from ${lot.status}` });
+      return;
+    }
+    lot.status = "going_twice";
+    lot.sequence++;
+    await this.persistState();
+    await this.ctx.storage.setAlarm(Date.now() + 5000);
+    this.broadcastLotUpdate(lot);
+  }
+
+  private async handleSold(ws: WebSocket, lotId: string) {
+    const lot = this.state.lots.get(lotId);
+    if (!lot) {
+      this.sendToSocket(ws, { type: "error", message: "Lot not found" });
+      return;
+    }
+    if (!canTransitionLot(lot.status, "sold")) {
+      this.sendToSocket(ws, { type: "error", message: `Cannot mark sold from ${lot.status}` });
+      return;
+    }
+    lot.status = "sold";
+    lot.sequence++;
+    this.ctx.storage.deleteAlarm();
+
+    // Record winner in D1
+    if (lot.currentBidderId) {
+      const db = new Kysely<AppDatabase>({
+        dialect: new D1Dialect({ database: this.env.DB }),
+      });
+      await db
+        .updateTable("lots")
+        .set({
+          status: "sold",
+          currentBidCents: lot.currentBidCents,
+          currentBidderId: lot.currentBidderId,
+          winnerUserId: lot.currentBidderId,
+          winnerAmountCents: lot.currentBidCents,
+          bidCount: lot.bidCount,
+          updatedAt: new Date().toISOString(),
+        })
+        .where("id", "=", lotId)
+        .execute();
+    }
+
+    await this.persistState();
+    await this.flushBidBuffer();
+    this.broadcastLotUpdate(lot);
+  }
+
+  private async handlePass(ws: WebSocket, lotId: string) {
+    const lot = this.state.lots.get(lotId);
+    if (!lot) {
+      this.sendToSocket(ws, { type: "error", message: "Lot not found" });
+      return;
+    }
+    if (!canTransitionLot(lot.status, "passed")) {
+      this.sendToSocket(ws, { type: "error", message: `Cannot pass from ${lot.status}` });
+      return;
+    }
+    lot.status = "passed";
+    lot.sequence++;
+    this.ctx.storage.deleteAlarm();
+    await this.persistState();
+    await this.flushBidBuffer();
+    this.broadcastLotUpdate(lot);
+  }
+
+  private async handleWithdraw(ws: WebSocket, lotId: string) {
+    const lot = this.state.lots.get(lotId);
+    if (!lot) {
+      this.sendToSocket(ws, { type: "error", message: "Lot not found" });
+      return;
+    }
+    if (!canTransitionLot(lot.status, "withdrawn")) {
+      this.sendToSocket(ws, { type: "error", message: `Cannot withdraw from ${lot.status}` });
+      return;
+    }
+    lot.status = "withdrawn";
+    lot.sequence++;
+    this.ctx.storage.deleteAlarm();
+    await this.persistState();
+    await this.flushBidBuffer();
+    this.broadcastLotUpdate(lot);
+  }
+
+  private async handleAdvanceLot(ws: WebSocket) {
+    // Find next pending lot by lotNumber order
+    const pendingLots = [...this.state.lots.values()]
+      .filter((l) => l.status === "pending")
+      .sort((a, b) => a.lotNumber - b.lotNumber);
+
+    if (pendingLots.length === 0) {
+      this.sendToSocket(ws, { type: "error", message: "No pending lots" });
+      return;
+    }
+
+    const nextLot = pendingLots[0];
+    nextLot.status = "active";
+    nextLot.sequence++;
+    this.state.currentLotId = nextLot.id;
+
+    await this.persistState();
+    this.broadcastLotUpdate(nextLot);
+    this.broadcast({
+      type: "auction_update",
+      status: this.state.status,
+      activeLotNumber: nextLot.lotNumber,
+    });
+  }
+
+  private async handleStartAuction(ws: WebSocket) {
+    if (!canTransitionAuction(this.state.status, "live")) {
+      this.sendToSocket(ws, {
+        type: "error",
+        message: `Cannot start auction from ${this.state.status}`,
+      });
+      return;
+    }
+
+    const db = new Kysely<AppDatabase>({
+      dialect: new D1Dialect({ database: this.env.DB }),
+    });
+    await db
+      .updateTable("auctions")
+      .set({
+        status: "live",
+        actualStartAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      })
+      .where("id", "=", this.state.auctionId)
+      .execute();
+
+    this.state.status = "live";
+    await this.persistState();
+
+    const currentLot = this.state.currentLotId
+      ? this.state.lots.get(this.state.currentLotId)
+      : null;
+    this.broadcast({
+      type: "auction_update",
+      status: this.state.status,
+      activeLotNumber: currentLot?.lotNumber ?? null,
+    });
+  }
+
+  private async handleCloseAuction(ws: WebSocket) {
+    if (!canTransitionAuction(this.state.status, "closed")) {
+      this.sendToSocket(ws, {
+        type: "error",
+        message: `Cannot close auction from ${this.state.status}`,
+      });
+      return;
+    }
+
+    const db = new Kysely<AppDatabase>({
+      dialect: new D1Dialect({ database: this.env.DB }),
+    });
+    await db
+      .updateTable("auctions")
+      .set({
+        status: "closed",
+        actualEndAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      })
+      .where("id", "=", this.state.auctionId)
+      .execute();
+
+    this.state.status = "closed";
+    await this.persistState();
+    this.broadcast({
+      type: "auction_update",
+      status: this.state.status,
+      activeLotNumber: null,
+    });
+  }
+
   // ─── Helpers ────────────────────────────────────────────────────
+
+  private broadcastLotUpdate(lot: LotState) {
+    this.broadcast({
+      type: "lot_update",
+      lotId: lot.id,
+      status: lot.status,
+      currentBidCents: lot.currentBidCents,
+      currentBidderId: lot.currentBidderId,
+      bidCount: lot.bidCount,
+    });
+  }
 
   broadcast(msg: ServerMessage, tag?: string) {
     const data = JSON.stringify(msg);
