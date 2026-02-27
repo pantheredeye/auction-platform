@@ -67,3 +67,28 @@ export async function getAuctionBySlug(slug: string) {
     streamUrl: auction.streamUrl,
   };
 }
+
+export async function getStreamWhepUrl(auctionSlug: string): Promise<string | null> {
+  const { ctx } = requestInfo;
+  const orgId = ctx.currentOrganization!.id;
+
+  const auction = await db
+    .selectFrom("auctions")
+    .select("streamProviderId")
+    .where("organizationId", "=", orgId)
+    .where("slug", "=", auctionSlug)
+    .executeTakeFirst();
+
+  if (!auction?.streamProviderId) return null;
+
+  const provider = await db
+    .selectFrom("stream_providers")
+    .select("config")
+    .where("id", "=", auction.streamProviderId)
+    .executeTakeFirst();
+
+  if (!provider?.config) return null;
+
+  const config = JSON.parse(provider.config) as { whepUrl?: string };
+  return config.whepUrl ?? null;
+}

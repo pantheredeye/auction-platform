@@ -22,7 +22,7 @@ import type {
 } from "@/auction/types";
 import { formatCents } from "@/lib/money";
 import { imageUrl } from "@/lib/image-url";
-import { Eye, MessageCircle } from "lucide-react";
+import { Eye, MessageCircle, Volume2, VolumeX } from "lucide-react";
 
 // ─── Types ──────────────────────────────────────────────────────────
 
@@ -50,6 +50,7 @@ interface AuctionRoomClientProps {
   initialUpcomingLots: LotsTable[];
   userId: string;
   username: string;
+  streamWhepUrl: string | null;
 }
 
 // ─── Component ──────────────────────────────────────────────────────
@@ -60,6 +61,7 @@ export function AuctionRoomClient({
   initialUpcomingLots,
   userId,
   username,
+  streamWhepUrl,
 }: AuctionRoomClientProps) {
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>("disconnected");
   const [auctionStatus, setAuctionStatus] = useState<AuctionStatus>(auction.status as AuctionStatus);
@@ -356,10 +358,8 @@ export function AuctionRoomClient({
         {/* Left: Stream + Lot + Bid (mobile: stacked, desktop: 60%) */}
         <div className="flex-1 md:w-3/5 flex flex-col overflow-y-auto">
 
-          {/* Stream placeholder */}
-          <div className="h-[40vh] md:h-[45vh] bg-black flex items-center justify-center shrink-0">
-            <p className="text-white/50 text-sm">Live stream</p>
-          </div>
+          {/* Live stream video */}
+          <WhepPlayer whepUrl={streamWhepUrl} />
 
           {/* Current lot card */}
           <div className="p-4 space-y-3">
@@ -686,5 +686,157 @@ function ChatInput({
         Send
       </Button>
     </form>
+  );
+}
+
+type StreamStatus = "connecting" | "live" | "unavailable" | "error";
+
+function WhepPlayer({ whepUrl }: { whepUrl: string | null }) {
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const pcRef = useRef<RTCPeerConnection | null>(null);
+  const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const mountedRef = useRef(true);
+
+  const [muted, setMuted] = useState(true);
+  const [status, setStatus] = useState<StreamStatus>(whepUrl ? "connecting" : "unavailable");
+
+  const cleanup = useCallback(() => {
+    if (reconnectTimer.current) {
+      clearTimeout(reconnectTimer.current);
+      reconnectTimer.current = null;
+    }
+    if (pcRef.current) {
+      pcRef.current.close();
+      pcRef.current = null;
+    }
+  }, []);
+
+  const connect = useCallback(async (url: string) => {
+    if (!mountedRef.current) return;
+    cleanup();
+    setStatus("connecting");
+
+    try {
+      const pc = new RTCPeerConnection();
+      pcRef.current = pc;
+
+      pc.addTransceiver("video", { direction: "recvonly" });
+      pc.addTransceiver("audio", { direction: "recvonly" });
+
+      pc.ontrack = (event) => {
+        if (videoRef.current && event.streams[0]) {
+          videoRef.current.srcObject = event.streams[0];
+        }
+      };
+
+      pc.onconnectionstatechange = () => {
+        if (!mountedRef.current) return;
+        const state = pc.connectionState;
+        if (state === "connected") {
+          setStatus("live");
+        } else if (state === "failed" || state === "disconnected" || state === "closed") {
+          setStatus("error");
+          scheduleReconnect(url);
+        }
+      };
+
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+
+      const resp = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/sdp" },
+        body: offer.sdp,
+      });
+
+      if (!resp.ok) {
+        throw new Error(`WHEP ${resp.status}`);
+      }
+
+      const answerSdp = await resp.text();
+      await pc.setRemoteDescription({ type: "answer", sdp: answerSdp });
+    } catch {
+      if (!mountedRef.current) return;
+      setStatus("error");
+      scheduleReconnect(url);
+    }
+  }, [cleanup]);
+
+  const scheduleReconnect = useCallback((url: string) => {
+    if (!mountedRef.current) return;
+    reconnectTimer.current = setTimeout(() => {
+      if (mountedRef.current) connect(url);
+    }, 5000);
+  }, [connect]);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    if (whepUrl) {
+      connect(whepUrl);
+    } else {
+      setStatus("unavailable");
+    }
+    return () => {
+      mountedRef.current = false;
+      cleanup();
+    };
+  }, [whepUrl, connect, cleanup]);
+
+  const toggleMute = () => {
+    setMuted((m) => !m);
+    if (videoRef.current) {
+      videoRef.current.muted = !videoRef.current.muted;
+    }
+  };
+
+  return (
+    <div className="relative h-[40vh] md:h-[45vh] bg-black shrink-0">
+      <video
+        ref={videoRef}
+        autoPlay
+        playsInline
+        muted={muted}
+        className="w-full h-full object-contain"
+      />
+
+      {/* Status overlays */}
+      {status === "connecting" && (
+        <div className="absolute inset-0 flex items-center justify-center">
+          <p className="text-white/60 text-sm animate-pulse">Connecting to stream...</p>
+        </div>
+      )}
+      {status === "unavailable" && (
+        <div className="absolute inset-0 flex items-center justify-center">
+          <p className="text-white/50 text-sm">Stream unavailable</p>
+        </div>
+      )}
+      {status === "error" && (
+        <div className="absolute inset-0 flex items-center justify-center">
+          <p className="text-white/50 text-sm">Stream disconnected — reconnecting...</p>
+        </div>
+      )}
+
+      {/* Mute/unmute control */}
+      {status === "live" && (
+        <button
+          onClick={toggleMute}
+          className="absolute bottom-3 right-3 bg-black/60 hover:bg-black/80 text-white rounded-full p-2 transition-colors"
+        >
+          {muted ? <VolumeX className="h-5 w-5" /> : <Volume2 className="h-5 w-5" />}
+        </button>
+      )}
+
+      {/* Tap to unmute overlay (only shown when muted and live) */}
+      {status === "live" && muted && (
+        <button
+          onClick={toggleMute}
+          className="absolute inset-0 flex items-end justify-center pb-14 cursor-pointer"
+        >
+          <span className="bg-black/70 text-white text-xs px-3 py-1.5 rounded-full flex items-center gap-1.5">
+            <VolumeX className="h-3.5 w-3.5" /> Tap to unmute
+          </span>
+        </button>
+      )}
+    </div>
   );
 }

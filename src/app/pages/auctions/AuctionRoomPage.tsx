@@ -1,5 +1,5 @@
 import type { RequestInfo } from "rwsdk/worker";
-import { getAuctionBySlug } from "./server-functions/browsing";
+import { getAuctionBySlug, getStreamWhepUrl } from "./server-functions/browsing";
 import { AuctionRoomClient } from "./AuctionRoomClient";
 
 export async function AuctionRoomPage({ ctx, params }: RequestInfo) {
@@ -15,6 +15,7 @@ export async function AuctionRoomPage({ ctx, params }: RequestInfo) {
   }
 
   const { auction, activeLot, upcomingLots } = result;
+  const streamWhepUrl = await getStreamWhepUrl(slug);
 
   return (
     <AuctionRoomClient
@@ -23,6 +24,7 @@ export async function AuctionRoomPage({ ctx, params }: RequestInfo) {
       initialUpcomingLots={upcomingLots}
       userId={ctx.user!.id}
       username={ctx.user!.displayName ?? ctx.user!.name ?? ctx.user!.username}
+      streamWhepUrl={streamWhepUrl}
     />
   );
 }
