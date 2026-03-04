@@ -22,7 +22,9 @@
     "types": "tsc",
     "seed": "rw-scripts worker-run ./src/scripts/seed.ts",
     "migrate:local": "wrangler d1 migrations apply auction-platform-db --local",
-    "migrate:remote": "wrangler d1 migrations apply auction-platform-db --remote"
+    "migrate:remote": "wrangler d1 migrations apply auction-platform-db --remote",
+    "release:staging": "rw-scripts ensure-deploy-env && npm run clean && npm run build && node scripts/staging-config.js && wrangler deploy --config dist/worker/wrangler.staging.json",
+    "migrate:staging": "wrangler d1 migrations apply auction-platform-db-staging --remote --env staging"
   },
   "dependencies": {
     "@radix-ui/react-label": "^2.1.8",

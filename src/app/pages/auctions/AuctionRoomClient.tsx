@@ -19,6 +19,7 @@ import type {
   ClientMessage,
   LotStatus,
   AuctionStatus,
+  SaleMode,
 } from "@/auction/types";
 import { formatCents } from "@/lib/money";
 import { imageUrl } from "@/lib/image-url";
@@ -42,6 +43,9 @@ interface LotDynamic {
   currentBidderId: string | null;
   currentBidderName: string | null;
   bidCount: number;
+  saleMode: SaleMode;
+  quantity: number;
+  quantityClaimed: number;
 }
 
 interface AuctionRoomClientProps {
@@ -50,7 +54,6 @@ interface AuctionRoomClientProps {
   initialUpcomingLots: LotsTable[];
   userId: string;
   username: string;
-  streamWhepUrl: string | null;
 }
 
 // ─── Component ──────────────────────────────────────────────────────
@@ -61,7 +64,6 @@ export function AuctionRoomClient({
   initialUpcomingLots,
   userId,
   username,
-  streamWhepUrl,
 }: AuctionRoomClientProps) {
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>("disconnected");
   const [auctionStatus, setAuctionStatus] = useState<AuctionStatus>(auction.status as AuctionStatus);
@@ -72,13 +74,14 @@ export function AuctionRoomClient({
   );
   const [currentLotState, setCurrentLotState] = useState<LotDynamic | null>(
     initialActiveLot
-      ? { status: initialActiveLot.status as LotStatus, currentBidCents: initialActiveLot.currentBidCents, currentBidderId: initialActiveLot.currentBidderId, currentBidderName: null, bidCount: initialActiveLot.bidCount }
+      ? { status: initialActiveLot.status as LotStatus, currentBidCents: initialActiveLot.currentBidCents, currentBidderId: initialActiveLot.currentBidderId, currentBidderName: null, bidCount: initialActiveLot.bidCount, saleMode: (initialActiveLot.saleMode ?? "english") as SaleMode, quantity: initialActiveLot.quantity ?? 1, quantityClaimed: initialActiveLot.quantityClaimed ?? 0 }
       : null,
   );
   const [upcomingLots, setUpcomingLots] = useState(initialUpcomingLots);
   const [viewerCount, setViewerCount] = useState(0);
   const [chatMessages, setChatMessages] = useState<ChatMsg[]>([]);
   const [myLastBidLotId, setMyLastBidLotId] = useState<string | null>(null);
+  const myLastBidLotIdRef = useRef<string | null>(null);
   const [bidInFlight, setBidInFlight] = useState(false);
   const [soldOverlay, setSoldOverlay] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
@@ -94,6 +97,7 @@ export function AuctionRoomClient({
   const chatEndRef = useRef<HTMLDivElement | null>(null);
   const chatOpenRef = useRef(chatOpen);
   chatOpenRef.current = chatOpen;
+  myLastBidLotIdRef.current = myLastBidLotId;
 
   const sendMessage = useCallback((msg: ClientMessage) => {
     const ws = wsRef.current;
@@ -105,18 +109,22 @@ export function AuctionRoomClient({
   const handleServerMessage = useCallback((msg: ServerMessage) => {
     switch (msg.type) {
       case "lot_update": {
+        const prev = lotsRef.current.get(msg.lotId);
         const dynamic: LotDynamic = {
           status: msg.status,
           currentBidCents: msg.currentBidCents,
           currentBidderId: msg.currentBidderId,
           currentBidderName: msg.currentBidderName,
           bidCount: msg.bidCount,
+          saleMode: msg.saleMode ?? prev?.saleMode ?? "english",
+          quantity: msg.quantity ?? prev?.quantity ?? 1,
+          quantityClaimed: msg.quantityClaimed ?? prev?.quantityClaimed ?? 0,
         };
         lotsRef.current.set(msg.lotId, dynamic);
 
         // Outbid detection
         if (
-          myLastBidLotId === msg.lotId &&
+          myLastBidLotIdRef.current === msg.lotId &&
           msg.currentBidderId !== null &&
           msg.currentBidderId !== userId
         ) {
@@ -187,6 +195,18 @@ export function AuctionRoomClient({
         toast.error(`Bid rejected: ${msg.reason}`);
         break;
 
+      case "claim_accepted":
+        if (msg.userId === userId) {
+          setBidInFlight(false);
+          toast.success(`Claimed ${msg.quantity} at ${formatCents(msg.amountCents)}`);
+        }
+        break;
+
+      case "claim_rejected":
+        setBidInFlight(false);
+        toast.error(`Claim rejected: ${msg.reason}`);
+        break;
+
       case "chat_message":
         setChatMessages((prev) =>
           [...prev, { id: msg.id, userId: msg.userId, username: msg.username, content: msg.content, createdAt: msg.createdAt }].slice(-100),
@@ -208,7 +228,7 @@ export function AuctionRoomClient({
       case "pong":
         break;
     }
-  }, [userId, myLastBidLotId]);
+  }, [userId]);
 
   // ─── WebSocket lifecycle ──────────────────────────────────────────
 
@@ -295,6 +315,17 @@ export function AuctionRoomClient({
     });
   }, [currentLot, nextBidCents, sendMessage, bidInFlight]);
 
+  const handleClaim = useCallback((qty: number = 1) => {
+    if (!currentLot || bidInFlight) return;
+    setBidInFlight(true);
+    sendMessage({
+      type: "claim",
+      lotId: currentLot.id,
+      quantity: qty,
+      idempotencyKey: crypto.randomUUID(),
+    });
+  }, [currentLot, sendMessage, bidInFlight]);
+
   // ─── Derived state ────────────────────────────────────────────────
 
   const isLive = auctionStatus === "live";
@@ -310,7 +341,9 @@ export function AuctionRoomClient({
         ? "bg-yellow-500"
         : "bg-red-500";
 
-  const isCountdown = currentLotState?.status === "going_once" || currentLotState?.status === "going_twice";
+  const saleMode = currentLotState?.saleMode ?? "english";
+  const isEnglish = saleMode === "english";
+  const isCountdown = isEnglish && (currentLotState?.status === "going_once" || currentLotState?.status === "going_twice");
 
   // ─── Render ───────────────────────────────────────────────────────
 
@@ -341,14 +374,14 @@ export function AuctionRoomClient({
         </div>
       </header>
 
-      {/* Going once / Going twice / Sold overlays */}
-      {currentLotState?.status === "going_once" && (
+      {/* Going once / Going twice / Sold overlays (english only) */}
+      {isEnglish && currentLotState?.status === "going_once" && (
         <AuctionOverlay variant="going_once" />
       )}
-      {currentLotState?.status === "going_twice" && (
+      {isEnglish && currentLotState?.status === "going_twice" && (
         <AuctionOverlay variant="going_twice" />
       )}
-      {soldOverlay && (
+      {isEnglish && soldOverlay && (
         <AuctionOverlay variant="sold" />
       )}
 
@@ -359,7 +392,7 @@ export function AuctionRoomClient({
         <div className="flex-1 md:w-3/5 flex flex-col overflow-y-auto">
 
           {/* Live stream video */}
-          <WhepPlayer whepUrl={streamWhepUrl} />
+          <WhepPlayer whepUrl={`/play/${auction.id}`} />
 
           {/* Current lot card */}
           <div className="p-4 space-y-3">
@@ -449,33 +482,34 @@ export function AuctionRoomClient({
         )}
       </Button>
 
-      {/* Sticky bottom bid bar — always visible */}
+      {/* Sticky bottom bid/claim bar — mode-aware */}
       <div className="border-t bg-background px-4 py-3 shrink-0">
-        {isLotActive && currentLot ? (
-          <div className="flex items-center gap-3">
-            <div className="flex-1 min-w-0">
-              <p className="text-xs text-muted-foreground">
-                {hasBids ? "Current bid" : "Starting at"}
-              </p>
-              <p className="text-lg font-bold tabular-nums">
-                {hasBids ? formatCents(currentLotState!.currentBidCents!) : formatCents(currentLot.startingPriceCents)}
-              </p>
-            </div>
-            {isHighBidder ? (
-              <Button size="lg" disabled className="font-bold text-base px-8 w-full sm:w-auto">
-                You are the highest bidder
-              </Button>
-            ) : (
-              <Button
-                size="lg"
-                disabled={!isConnected || bidInFlight}
-                onClick={handleBid}
-                className="font-bold text-base px-8 w-full sm:w-auto bg-green-600 hover:bg-green-700 min-h-[3rem]"
-              >
-                {bidInFlight ? "Placing bid..." : `Bid ${formatCents(nextBidCents)}`}
-              </Button>
-            )}
-          </div>
+        {isLotActive && currentLot && currentLotState ? (
+          saleMode === "english" ? (
+            <EnglishBidBar
+              currentLotState={currentLotState}
+              startingPriceCents={currentLot.startingPriceCents}
+              nextBidCents={nextBidCents}
+              isHighBidder={isHighBidder}
+              isConnected={isConnected}
+              bidInFlight={bidInFlight}
+              onBid={handleBid}
+            />
+          ) : saleMode === "live_sell" ? (
+            <LiveSellClaimBar
+              currentLotState={currentLotState}
+              isConnected={isConnected}
+              bidInFlight={bidInFlight}
+              onClaim={handleClaim}
+            />
+          ) : (
+            <DutchBuyBar
+              currentLotState={currentLotState}
+              isConnected={isConnected}
+              bidInFlight={bidInFlight}
+              onClaim={handleClaim}
+            />
+          )
         ) : (
           <Button size="lg" disabled className="w-full font-bold text-base min-h-[3rem]">
             Waiting for next item
@@ -498,6 +532,7 @@ function CurrentLotCard({
   isHighBidder: boolean;
 }) {
   const hasBids = state.bidCount > 0 && state.currentBidCents != null;
+  const isClaimMode = state.saleMode === "live_sell" || state.saleMode === "dutch";
 
   return (
     <Card className="py-3">
@@ -518,26 +553,180 @@ function CurrentLotCard({
                 <p className="text-sm text-muted-foreground line-clamp-2 mt-0.5">{lot.description}</p>
               )}
             </div>
-            <LotStatusBadge status={state.status} />
-          </div>
-          <div className="flex items-baseline gap-4">
-            <div>
-              <p className="text-xs text-muted-foreground">{hasBids ? "Current bid" : "Starting price"}</p>
-              <p className="text-3xl font-bold tabular-nums">
-                {hasBids ? formatCents(state.currentBidCents!) : formatCents(lot.startingPriceCents)}
-              </p>
-            </div>
-            <div>
-              <p className="text-xs text-muted-foreground">Bids</p>
-              <Badge variant="secondary" className="text-sm font-semibold">{state.bidCount}</Badge>
+            <div className="flex items-center gap-1.5">
+              {state.saleMode !== "english" && (
+                <Badge variant="outline" className="text-[10px] px-1.5 py-0">
+                  {state.saleMode === "live_sell" ? "Live Sell" : "Dutch"}
+                </Badge>
+              )}
+              <LotStatusBadge status={state.status} />
             </div>
           </div>
-          {isHighBidder && (
-            <p className="text-xs text-green-600 font-medium">You're winning!</p>
+
+          {isClaimMode ? (
+            /* Claim mode display: fixed price + progress */
+            <div className="flex items-baseline gap-4">
+              <div>
+                <p className="text-xs text-muted-foreground">{state.saleMode === "dutch" ? "Current price" : "Price"}</p>
+                <p className="text-3xl font-bold tabular-nums">
+                  {formatCents(state.currentBidCents ?? lot.startingPriceCents)}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground">Claimed</p>
+                <Badge variant="secondary" className="text-sm font-semibold">
+                  {state.quantityClaimed} / {state.quantity}
+                </Badge>
+              </div>
+            </div>
+          ) : (
+            /* English auction display */
+            <>
+              <div className="flex items-baseline gap-4">
+                <div>
+                  <p className="text-xs text-muted-foreground">{hasBids ? "Current bid" : "Starting price"}</p>
+                  <p className="text-3xl font-bold tabular-nums">
+                    {hasBids ? formatCents(state.currentBidCents!) : formatCents(lot.startingPriceCents)}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">Bids</p>
+                  <Badge variant="secondary" className="text-sm font-semibold">{state.bidCount}</Badge>
+                </div>
+              </div>
+              {isHighBidder && (
+                <p className="text-xs text-green-600 font-medium">You're winning!</p>
+              )}
+            </>
+          )}
+
+          {/* Claim progress bar */}
+          {isClaimMode && state.quantity > 1 && (
+            <div className="h-2 w-full rounded-full bg-muted overflow-hidden">
+              <div
+                className="h-full rounded-full bg-green-500 transition-all duration-300"
+                style={{ width: `${Math.min((state.quantityClaimed / state.quantity) * 100, 100)}%` }}
+              />
+            </div>
           )}
         </div>
       </CardContent>
     </Card>
+  );
+}
+
+// ─── Mode-specific bid/claim bars ────────────────────────────────
+
+function EnglishBidBar({
+  currentLotState,
+  startingPriceCents,
+  nextBidCents,
+  isHighBidder,
+  isConnected,
+  bidInFlight,
+  onBid,
+}: {
+  currentLotState: LotDynamic;
+  startingPriceCents: number;
+  nextBidCents: number;
+  isHighBidder: boolean;
+  isConnected: boolean;
+  bidInFlight: boolean;
+  onBid: () => void;
+}) {
+  const hasBids = currentLotState.bidCount > 0 && currentLotState.currentBidCents != null;
+  return (
+    <div className="flex items-center gap-3">
+      <div className="flex-1 min-w-0">
+        <p className="text-xs text-muted-foreground">{hasBids ? "Current bid" : "Starting at"}</p>
+        <p className="text-lg font-bold tabular-nums">
+          {hasBids ? formatCents(currentLotState.currentBidCents!) : formatCents(startingPriceCents)}
+        </p>
+      </div>
+      {isHighBidder ? (
+        <Button size="lg" disabled className="font-bold text-base px-8 w-full sm:w-auto">
+          You are the highest bidder
+        </Button>
+      ) : (
+        <Button
+          size="lg"
+          disabled={!isConnected || bidInFlight}
+          onClick={onBid}
+          className="font-bold text-base px-8 w-full sm:w-auto bg-green-600 hover:bg-green-700 min-h-[3rem]"
+        >
+          {bidInFlight ? "Placing bid..." : `Bid ${formatCents(nextBidCents)}`}
+        </Button>
+      )}
+    </div>
+  );
+}
+
+function LiveSellClaimBar({
+  currentLotState,
+  isConnected,
+  bidInFlight,
+  onClaim,
+}: {
+  currentLotState: LotDynamic;
+  isConnected: boolean;
+  bidInFlight: boolean;
+  onClaim: (qty?: number) => void;
+}) {
+  const remaining = currentLotState.quantity - currentLotState.quantityClaimed;
+  const price = currentLotState.currentBidCents ?? 0;
+  const soldOut = remaining <= 0;
+
+  return (
+    <div className="flex items-center gap-3">
+      <div className="flex-1 min-w-0">
+        <p className="text-xs text-muted-foreground">Price</p>
+        <p className="text-lg font-bold tabular-nums">{formatCents(price)}</p>
+        <p className="text-xs text-muted-foreground">
+          {soldOut ? "Sold out" : `${remaining} of ${currentLotState.quantity} left`}
+        </p>
+      </div>
+      <Button
+        size="lg"
+        disabled={!isConnected || bidInFlight || soldOut}
+        onClick={() => onClaim(1)}
+        className="font-bold text-base px-8 w-full sm:w-auto bg-blue-600 hover:bg-blue-700 min-h-[3rem]"
+      >
+        {bidInFlight ? "Claiming..." : soldOut ? "Sold Out" : `Claim — ${formatCents(price)}`}
+      </Button>
+    </div>
+  );
+}
+
+function DutchBuyBar({
+  currentLotState,
+  isConnected,
+  bidInFlight,
+  onClaim,
+}: {
+  currentLotState: LotDynamic;
+  isConnected: boolean;
+  bidInFlight: boolean;
+  onClaim: (qty?: number) => void;
+}) {
+  const price = currentLotState.currentBidCents ?? 0;
+  const remaining = currentLotState.quantity - currentLotState.quantityClaimed;
+  const soldOut = remaining <= 0;
+
+  return (
+    <div className="flex items-center gap-3">
+      <div className="flex-1 min-w-0">
+        <p className="text-xs text-muted-foreground">Current price</p>
+        <p className="text-lg font-bold tabular-nums">{formatCents(price)}</p>
+      </div>
+      <Button
+        size="lg"
+        disabled={!isConnected || bidInFlight || soldOut}
+        onClick={() => onClaim(1)}
+        className="font-bold text-base px-8 w-full sm:w-auto bg-amber-600 hover:bg-amber-700 min-h-[3rem]"
+      >
+        {bidInFlight ? "Buying..." : soldOut ? "Sold Out" : `Buy at ${formatCents(price)}`}
+      </Button>
+    </div>
   );
 }
 
@@ -689,16 +878,16 @@ function ChatInput({
   );
 }
 
-type StreamStatus = "connecting" | "live" | "unavailable" | "error";
+type StreamStatus = "connecting" | "live" | "waiting" | "error";
 
-function WhepPlayer({ whepUrl }: { whepUrl: string | null }) {
+function WhepPlayer({ whepUrl }: { whepUrl: string }) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mountedRef = useRef(true);
 
   const [muted, setMuted] = useState(true);
-  const [status, setStatus] = useState<StreamStatus>(whepUrl ? "connecting" : "unavailable");
+  const [status, setStatus] = useState<StreamStatus>("connecting");
 
   const cleanup = useCallback(() => {
     if (reconnectTimer.current) {
@@ -749,6 +938,14 @@ function WhepPlayer({ whepUrl }: { whepUrl: string | null }) {
         body: offer.sdp,
       });
 
+      if (resp.status === 404) {
+        // Stream not started yet — show waiting, retry
+        if (pcRef.current) { pcRef.current.close(); pcRef.current = null; }
+        setStatus("waiting");
+        scheduleReconnect(url);
+        return;
+      }
+
       if (!resp.ok) {
         throw new Error(`WHEP ${resp.status}`);
       }
@@ -771,11 +968,7 @@ function WhepPlayer({ whepUrl }: { whepUrl: string | null }) {
 
   useEffect(() => {
     mountedRef.current = true;
-    if (whepUrl) {
-      connect(whepUrl);
-    } else {
-      setStatus("unavailable");
-    }
+    connect(whepUrl);
     return () => {
       mountedRef.current = false;
       cleanup();
@@ -805,9 +998,9 @@ function WhepPlayer({ whepUrl }: { whepUrl: string | null }) {
           <p className="text-white/60 text-sm animate-pulse">Connecting to stream...</p>
         </div>
       )}
-      {status === "unavailable" && (
+      {status === "waiting" && (
         <div className="absolute inset-0 flex items-center justify-center">
-          <p className="text-white/50 text-sm">Stream unavailable</p>
+          <p className="text-white/50 text-sm animate-pulse">Waiting for stream...</p>
         </div>
       )}
       {status === "error" && (

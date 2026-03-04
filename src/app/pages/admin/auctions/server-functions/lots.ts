@@ -71,6 +71,8 @@ export async function createLot(
     incrementCents?: number | null;
     quantity?: number;
     extensionSeconds?: number | null;
+    saleMode?: string;
+    maxClaimsPerUser?: number | null;
   },
 ) {
   const { ctx } = requestInfo;
@@ -115,6 +117,9 @@ export async function createLot(
       bidCount: 0,
       status: "pending",
       quantity: data.quantity ?? 1,
+      saleMode: data.saleMode ?? "english",
+      quantityClaimed: 0,
+      maxClaimsPerUser: data.maxClaimsPerUser ?? null,
       extensionSeconds: data.extensionSeconds ?? null,
       closesAt: null,
       winnerUserId: null,
@@ -147,6 +152,8 @@ export async function updateLot(
     incrementCents?: number | null;
     quantity?: number;
     extensionSeconds?: number | null;
+    saleMode?: string;
+    maxClaimsPerUser?: number | null;
   },
   version: number,
 ) {
@@ -183,6 +190,9 @@ export async function updateLot(
   if (data.incrementCents !== undefined)
     updates.incrementCents = data.incrementCents;
   if (data.quantity !== undefined) updates.quantity = data.quantity;
+  if (data.saleMode !== undefined) updates.saleMode = data.saleMode;
+  if (data.maxClaimsPerUser !== undefined)
+    updates.maxClaimsPerUser = data.maxClaimsPerUser;
   if (data.extensionSeconds !== undefined)
     updates.extensionSeconds = data.extensionSeconds;
 
@@ -335,10 +345,15 @@ export async function addLotItem(
 }
 
 export async function removeLotItem(lotItemId: string) {
+  const { ctx } = requestInfo;
+  const orgId = ctx.currentOrganization!.id;
+
   const item = await db
     .selectFrom("lot_items")
-    .selectAll()
-    .where("id", "=", lotItemId)
+    .innerJoin("lots", "lots.id", "lot_items.lotId")
+    .selectAll("lot_items")
+    .where("lot_items.id", "=", lotItemId)
+    .where("lots.organizationId", "=", orgId)
     .executeTakeFirst();
 
   if (!item) throw new Error("Lot item not found");

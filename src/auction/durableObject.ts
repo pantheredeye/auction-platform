@@ -10,6 +10,7 @@ import type {
   LotState,
   ServerMessage,
   IncrementRule,
+  SaleMode,
 } from "./types";
 import { resolveIncrement, validateBidAmount } from "./increments";
 import { canTransitionLot, canTransitionAuction } from "./state-machine";
@@ -17,7 +18,7 @@ import { canTransitionLot, canTransitionAuction } from "./state-machine";
 const ADMIN_MESSAGE_TYPES = new Set([
   "advance_lot", "going_once", "going_twice", "sold",
   "pass", "withdraw", "floor_bid", "start_auction",
-  "close_auction", "quick_add_lot",
+  "close_auction", "quick_add_lot", "set_price", "close_lot",
 ]);
 
 // ─── Socket attachment ──────────────────────────────────────────────
@@ -54,7 +55,7 @@ export class AuctionRoomDO extends DurableObject<Cloudflare.Env> {
     this.state = emptyState();
     this.ctx.setWebSocketAutoResponse(
       new WebSocketRequestResponsePair(
-        "ping",
+        JSON.stringify({ type: "ping" }),
         JSON.stringify({ type: "pong" }),
       ),
     );
@@ -123,6 +124,11 @@ export class AuctionRoomDO extends DurableObject<Cloudflare.Env> {
         incrementCents: lot.incrementCents ?? null,
         status: lot.status as LotState["status"],
         sequence: 0,
+        saleMode: (lot.saleMode ?? "english") as SaleMode,
+        quantity: lot.quantity ?? 1,
+        quantityClaimed: lot.quantityClaimed ?? 0,
+        maxClaimsPerUser: lot.maxClaimsPerUser ?? null,
+        claimants: [],
       });
     }
 
@@ -157,17 +163,7 @@ export class AuctionRoomDO extends DurableObject<Cloudflare.Env> {
     const lotData = (await request.json()) as LotState;
     this.state.lots.set(lotData.id, lotData);
     await this.persistState();
-
-    this.broadcast({
-      type: "lot_update",
-      lotId: lotData.id,
-      status: lotData.status,
-      currentBidCents: lotData.currentBidCents,
-      currentBidderId: lotData.currentBidderId,
-      currentBidderName: lotData.currentBidderName,
-      bidCount: lotData.bidCount,
-    });
-
+    this.broadcastLotUpdate(lotData);
     return new Response("OK", { status: 200 });
   }
 
@@ -296,6 +292,8 @@ export class AuctionRoomDO extends DurableObject<Cloudflare.Env> {
 
     if (type === "bid") {
       this.handleBid(ws, parsed as unknown as ClientMessage & { type: "bid" });
+    } else if (type === "claim") {
+      this.handleClaim(ws, parsed as unknown as ClientMessage & { type: "claim" });
     } else if (type === "chat") {
       this.handleChat(ws, parsed as unknown as ClientMessage & { type: "chat" });
     } else if (ADMIN_MESSAGE_TYPES.has(type as string)) {
@@ -322,6 +320,12 @@ export class AuctionRoomDO extends DurableObject<Cloudflare.Env> {
     const lot = this.state.lots.get(lotId);
     if (!lot) {
       this.sendToSocket(ws, { type: "bid_rejected", lotId, reason: "Lot not found" });
+      return;
+    }
+
+    // Mode guard: bids only for english auctions
+    if (lot.saleMode !== "english") {
+      this.sendToSocket(ws, { type: "bid_rejected", lotId, reason: "Use claim for this sale mode" });
       return;
     }
 
@@ -428,6 +432,121 @@ export class AuctionRoomDO extends DurableObject<Cloudflare.Env> {
     });
   }
 
+  // ─── Claim handling (live_sell / dutch) ─────────────────────────
+
+  private handleClaim(
+    ws: WebSocket,
+    msg: { type: "claim"; lotId: string; quantity: number; idempotencyKey: string },
+  ) {
+    const attachment = ws.deserializeAttachment() as SocketAttachment | null;
+    if (!attachment) {
+      this.sendToSocket(ws, { type: "error", message: "No attachment" });
+      return;
+    }
+
+    const { userId, username } = attachment;
+    const { lotId, quantity, idempotencyKey } = msg;
+
+    const lot = this.state.lots.get(lotId);
+    if (!lot) {
+      this.sendToSocket(ws, { type: "claim_rejected", lotId, reason: "Lot not found" });
+      return;
+    }
+
+    // Mode guard
+    if (lot.saleMode !== "live_sell" && lot.saleMode !== "dutch") {
+      this.sendToSocket(ws, { type: "claim_rejected", lotId, reason: "Use bid for english auctions" });
+      return;
+    }
+
+    if (lot.status !== "active") {
+      this.sendToSocket(ws, { type: "claim_rejected", lotId, reason: `Lot is ${lot.status}, not accepting claims` });
+      return;
+    }
+
+    // Check remaining quantity
+    const remaining = lot.quantity - lot.quantityClaimed;
+    if (remaining <= 0) {
+      this.sendToSocket(ws, { type: "claim_rejected", lotId, reason: "Sold out" });
+      return;
+    }
+
+    const claimQty = Math.min(quantity, remaining);
+
+    // Enforce maxClaimsPerUser
+    if (lot.maxClaimsPerUser !== null) {
+      const userClaimed = lot.claimants
+        .filter((c) => c.userId === userId)
+        .reduce((sum, c) => sum + c.quantity, 0);
+      if (userClaimed + claimQty > lot.maxClaimsPerUser) {
+        this.sendToSocket(ws, { type: "claim_rejected", lotId, reason: `Max ${lot.maxClaimsPerUser} claims per user` });
+        return;
+      }
+    }
+
+    // Idempotency
+    if (this.idempotencyKeys.has(idempotencyKey)) {
+      this.sendToSocket(ws, { type: "claim_rejected", lotId, reason: "Duplicate claim" });
+      return;
+    }
+    this.idempotencyKeys.add(idempotencyKey);
+
+    // Accept claim
+    const amountCents = lot.currentBidCents;
+    lot.quantityClaimed += claimQty;
+    lot.bidCount++;
+    lot.sequence++;
+    lot.claimants.push({
+      userId,
+      username,
+      quantity: claimQty,
+      amountCents,
+      claimedAt: new Date().toISOString(),
+    });
+
+    // Buffer claim event
+    this.bidBuffer.push({
+      auctionId: this.state.auctionId,
+      lotId,
+      userId,
+      type: "claim",
+      amountCents,
+      previousHighCents: amountCents,
+      previousHighUserId: null,
+      onBehalfOfName: null,
+      placedByUserId: null,
+      idempotencyKey,
+      sequence: lot.sequence,
+      createdAt: new Date().toISOString(),
+    });
+
+    if (this.bidBuffer.length >= 10) {
+      this.flushBidBuffer();
+    }
+
+    // Auto-sell if fully claimed
+    if (lot.quantityClaimed >= lot.quantity) {
+      lot.status = "sold";
+      lot.sequence++;
+      this.flushBidBuffer();
+    }
+
+    this.persistState();
+
+    // Confirm to claimer
+    this.sendToSocket(ws, {
+      type: "claim_accepted",
+      lotId,
+      quantity: claimQty,
+      amountCents,
+      userId,
+      quantityClaimed: lot.quantityClaimed,
+    });
+
+    // Broadcast update
+    this.broadcastLotUpdate(lot);
+  }
+
   // ─── Chat handling ──────────────────────────────────────────────
 
   private handleChat(ws: WebSocket, msg: { type: "chat"; content: string }) {
@@ -501,6 +620,12 @@ export class AuctionRoomDO extends DurableObject<Cloudflare.Env> {
       case "quick_add_lot":
         await this.handleQuickAddLot(ws, msg);
         break;
+      case "set_price":
+        await this.handleSetPrice(ws, msg);
+        break;
+      case "close_lot":
+        await this.handleCloseLot(ws, msg.lotId);
+        break;
       default:
         this.sendToSocket(ws, { type: "error", message: "Unknown admin command" });
     }
@@ -512,7 +637,11 @@ export class AuctionRoomDO extends DurableObject<Cloudflare.Env> {
       this.sendToSocket(ws, { type: "error", message: "Lot not found" });
       return;
     }
-    if (!canTransitionLot(lot.status, "going_once")) {
+    if (lot.saleMode !== "english") {
+      this.sendToSocket(ws, { type: "error", message: "Going once/twice only for english auctions" });
+      return;
+    }
+    if (!canTransitionLot(lot.status, "going_once", lot.saleMode)) {
       this.sendToSocket(ws, { type: "error", message: `Cannot go going_once from ${lot.status}` });
       return;
     }
@@ -529,7 +658,11 @@ export class AuctionRoomDO extends DurableObject<Cloudflare.Env> {
       this.sendToSocket(ws, { type: "error", message: "Lot not found" });
       return;
     }
-    if (!canTransitionLot(lot.status, "going_twice")) {
+    if (lot.saleMode !== "english") {
+      this.sendToSocket(ws, { type: "error", message: "Going once/twice only for english auctions" });
+      return;
+    }
+    if (!canTransitionLot(lot.status, "going_twice", lot.saleMode)) {
       this.sendToSocket(ws, { type: "error", message: `Cannot go going_twice from ${lot.status}` });
       return;
     }
@@ -546,7 +679,7 @@ export class AuctionRoomDO extends DurableObject<Cloudflare.Env> {
       this.sendToSocket(ws, { type: "error", message: "Lot not found" });
       return;
     }
-    if (!canTransitionLot(lot.status, "sold")) {
+    if (!canTransitionLot(lot.status, "sold", lot.saleMode)) {
       this.sendToSocket(ws, { type: "error", message: `Cannot mark sold from ${lot.status}` });
       return;
     }
@@ -585,7 +718,7 @@ export class AuctionRoomDO extends DurableObject<Cloudflare.Env> {
       this.sendToSocket(ws, { type: "error", message: "Lot not found" });
       return;
     }
-    if (!canTransitionLot(lot.status, "passed")) {
+    if (!canTransitionLot(lot.status, "passed", lot.saleMode)) {
       this.sendToSocket(ws, { type: "error", message: `Cannot pass from ${lot.status}` });
       return;
     }
@@ -603,7 +736,7 @@ export class AuctionRoomDO extends DurableObject<Cloudflare.Env> {
       this.sendToSocket(ws, { type: "error", message: "Lot not found" });
       return;
     }
-    if (!canTransitionLot(lot.status, "withdrawn")) {
+    if (!canTransitionLot(lot.status, "withdrawn", lot.saleMode)) {
       this.sendToSocket(ws, { type: "error", message: `Cannot withdraw from ${lot.status}` });
       return;
     }
@@ -719,6 +852,12 @@ export class AuctionRoomDO extends DurableObject<Cloudflare.Env> {
       return;
     }
 
+    // Mode guard: floor bids only for english auctions
+    if (lot.saleMode !== "english") {
+      this.sendToSocket(ws, { type: "error", message: "Floor bids only for english auctions" });
+      return;
+    }
+
     const biddableStatuses = new Set(["active", "going_once", "going_twice"]);
     if (!biddableStatuses.has(lot.status)) {
       this.sendToSocket(ws, {
@@ -787,13 +926,79 @@ export class AuctionRoomDO extends DurableObject<Cloudflare.Env> {
     this.broadcastLotUpdate(lot);
   }
 
+  // ─── Set price (live_sell / dutch) ──────────────────────────────
+
+  private async handleSetPrice(
+    ws: WebSocket,
+    msg: { type: "set_price"; lotId: string; priceCents: number },
+  ) {
+    const lot = this.state.lots.get(msg.lotId);
+    if (!lot) {
+      this.sendToSocket(ws, { type: "error", message: "Lot not found" });
+      return;
+    }
+    if (lot.status !== "active") {
+      this.sendToSocket(ws, { type: "error", message: `Lot is ${lot.status}, cannot set price` });
+      return;
+    }
+    if (msg.priceCents <= 0) {
+      this.sendToSocket(ws, { type: "error", message: "Price must be positive" });
+      return;
+    }
+
+    lot.currentBidCents = msg.priceCents;
+    lot.sequence++;
+    await this.persistState();
+    this.broadcastLotUpdate(lot);
+  }
+
+  // ─── Close lot (live_sell / dutch) ────────────────────────────
+
+  private async handleCloseLot(ws: WebSocket, lotId: string) {
+    const lot = this.state.lots.get(lotId);
+    if (!lot) {
+      this.sendToSocket(ws, { type: "error", message: "Lot not found" });
+      return;
+    }
+    if (lot.status !== "active") {
+      this.sendToSocket(ws, { type: "error", message: `Lot is ${lot.status}, cannot close` });
+      return;
+    }
+
+    // Determine sold vs passed based on claims
+    lot.status = lot.quantityClaimed > 0 ? "sold" : "passed";
+    lot.sequence++;
+
+    // Record in D1
+    const db = new Kysely<AppDatabase>({
+      dialect: new D1Dialect({ database: this.env.DB }),
+    });
+    await db
+      .updateTable("lots")
+      .set({
+        status: lot.status,
+        quantityClaimed: lot.quantityClaimed,
+        bidCount: lot.bidCount,
+        updatedAt: new Date().toISOString(),
+      })
+      .where("id", "=", lotId)
+      .execute();
+
+    await this.persistState();
+    await this.flushBidBuffer();
+    this.broadcastLotUpdate(lot);
+  }
+
   // ─── Quick-add lot ──────────────────────────────────────────────
 
   private async handleQuickAddLot(
     ws: WebSocket,
-    msg: { type: "quick_add_lot"; title: string; startingPriceCents: number },
+    msg: { type: "quick_add_lot"; title: string; startingPriceCents: number; saleMode?: SaleMode; quantity?: number; maxClaimsPerUser?: number | null },
   ) {
     const lotId = crypto.randomUUID();
+    const saleMode: SaleMode = msg.saleMode ?? "english";
+    const quantity = msg.quantity ?? 1;
+    const maxClaimsPerUser = msg.maxClaimsPerUser ?? null;
 
     // Determine next lot number
     const lotNumbers = [...this.state.lots.values()].map((l) => l.lotNumber);
@@ -817,7 +1022,10 @@ export class AuctionRoomDO extends DurableObject<Cloudflare.Env> {
         status: "pending",
         currentBidCents: null,
         bidCount: 0,
-        quantity: 1,
+        quantity,
+        saleMode,
+        quantityClaimed: 0,
+        maxClaimsPerUser,
         version: 1,
         createdAt: now,
         updatedAt: now,
@@ -839,6 +1047,11 @@ export class AuctionRoomDO extends DurableObject<Cloudflare.Env> {
       incrementCents: null,
       status: "pending",
       sequence: 0,
+      saleMode,
+      quantity,
+      quantityClaimed: 0,
+      maxClaimsPerUser,
+      claimants: [],
     };
     this.state.lots.set(lotId, lotState);
 
@@ -878,6 +1091,9 @@ export class AuctionRoomDO extends DurableObject<Cloudflare.Env> {
       currentBidderId: lot.currentBidderId,
       currentBidderName: lot.currentBidderName,
       bidCount: lot.bidCount,
+      saleMode: lot.saleMode,
+      quantity: lot.quantity,
+      quantityClaimed: lot.quantityClaimed,
     });
   }
 
@@ -927,6 +1143,9 @@ export class AuctionRoomDO extends DurableObject<Cloudflare.Env> {
         currentBidderId: lot.currentBidderId,
         currentBidderName: lot.currentBidderName,
         bidCount: lot.bidCount,
+        saleMode: lot.saleMode,
+        quantity: lot.quantity,
+        quantityClaimed: lot.quantityClaimed,
       });
     }
 

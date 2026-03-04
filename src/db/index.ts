@@ -180,6 +180,9 @@ export interface LotsTable {
   closesAt: string | null;
   winnerUserId: string | null;
   winnerAmountCents: number | null;
+  saleMode: string;
+  quantityClaimed: number;
+  maxClaimsPerUser: number | null;
   imageUrls: string | null;
   thumbnailUrl: string | null;
   createdAt: string;

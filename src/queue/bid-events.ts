@@ -52,24 +52,39 @@ export async function processBidEvent(
 
   const now = new Date().toISOString();
 
-  // Update lot denormalized fields — only if this bid is higher than current
-  await db
-    .updateTable("lots")
-    .set({
-      currentBidCents: event.amountCents,
-      currentBidderId: event.userId,
-      bidCount: sql`bidCount + 1`,
-      version: sql`version + 1`,
-      updatedAt: now,
-    })
-    .where("id", "=", event.lotId)
-    .where((eb) =>
-      eb.or([
-        eb("currentBidCents", "is", null),
-        eb("currentBidCents", "<", event.amountCents),
-      ]),
-    )
-    .execute();
+  // Update lot denormalized fields
+  if (event.type === "claim") {
+    // Claim: increment quantityClaimed + bidCount, don't touch currentBidCents/currentBidderId
+    await db
+      .updateTable("lots")
+      .set({
+        quantityClaimed: sql`quantityClaimed + 1`,
+        bidCount: sql`bidCount + 1`,
+        version: sql`version + 1`,
+        updatedAt: now,
+      })
+      .where("id", "=", event.lotId)
+      .execute();
+  } else {
+    // Bid/floor_bid: only update if this bid is higher than current
+    await db
+      .updateTable("lots")
+      .set({
+        currentBidCents: event.amountCents,
+        currentBidderId: event.userId,
+        bidCount: sql`bidCount + 1`,
+        version: sql`version + 1`,
+        updatedAt: now,
+      })
+      .where("id", "=", event.lotId)
+      .where((eb) =>
+        eb.or([
+          eb("currentBidCents", "is", null),
+          eb("currentBidCents", "<", event.amountCents),
+        ]),
+      )
+      .execute();
+  }
 
   // Increment totalBids in auction_summaries
   await db

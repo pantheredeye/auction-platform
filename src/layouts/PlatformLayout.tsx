@@ -1,6 +1,5 @@
 import type { LayoutProps } from "rwsdk/router";
-import { AdminLayoutClient, type NavItem } from "./AdminLayoutClient";
-import { LayoutDashboard, Building2, DollarSign } from "lucide-react";
+import { AdminLayoutClient } from "./AdminLayoutClient";
 
 const EMPLOYEE_ROLES = [
   "super_admin",
@@ -9,12 +8,6 @@ const EMPLOYEE_ROLES = [
   "catalog_manager",
   "customer_service",
   "shipping",
-];
-
-const platformNavItems: NavItem[] = [
-  { href: "/platform", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/platform/organizations", label: "Organizations", icon: Building2 },
-  { href: "/platform/revenue", label: "Revenue", icon: DollarSign },
 ];
 
 export function PlatformLayout({ children, requestInfo }: LayoutProps) {
@@ -26,7 +19,7 @@ export function PlatformLayout({ children, requestInfo }: LayoutProps) {
     <AdminLayoutClient
       user={ctx?.user ?? null}
       currentOrganization={ctx?.currentOrganization ?? null}
-      navItems={platformNavItems}
+      navPreset="platform"
       title="Platform Admin"
       backLink={{ href: "/dashboard", label: "Shopper View" }}
       hasAdminAccess={hasAdminAccess}

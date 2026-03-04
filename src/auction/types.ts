@@ -21,12 +21,15 @@ export type LotStatus =
 
 export type AuctionType = "live_consumer" | "dealer_bulk" | "buy_now";
 
+export type SaleMode = "english" | "live_sell" | "dutch";
+
 export type BidEventType =
   | "bid"
   | "auto_bid"
   | "retract"
   | "system_extend"
-  | "floor_bid";
+  | "floor_bid"
+  | "claim";
 
 export type MembershipRole =
   | "super_admin"
@@ -45,6 +48,14 @@ export interface IncrementRule {
 
 // ─── DO state ───────────────────────────────────────────────────────
 
+export interface ClaimEntry {
+  userId: string;
+  username: string;
+  quantity: number;
+  amountCents: number;
+  claimedAt: string;
+}
+
 export interface LotState {
   id: string;
   lotNumber: number;
@@ -59,6 +70,11 @@ export interface LotState {
   incrementCents: number | null;
   status: LotStatus;
   sequence: number;
+  saleMode: SaleMode;
+  quantity: number;
+  quantityClaimed: number;
+  maxClaimsPerUser: number | null;
+  claimants: ClaimEntry[];
 }
 
 export interface AuctionRoomState {
@@ -92,13 +108,16 @@ export interface BufferedBidEvent {
 
 export type ClientMessage =
   | { type: "bid"; lotId: string; amountCents: number; idempotencyKey: string }
+  | { type: "claim"; lotId: string; quantity: number; idempotencyKey: string }
   | { type: "chat"; content: string }
   | { type: "ping" };
 
 export type ServerMessage =
   | { type: "bid_accepted"; lotId: string; amountCents: number; userId: string; bidCount: number }
   | { type: "bid_rejected"; lotId: string; reason: string }
-  | { type: "lot_update"; lotId: string; status: LotStatus; currentBidCents: number | null; currentBidderId: string | null; currentBidderName: string | null; bidCount: number }
+  | { type: "claim_accepted"; lotId: string; quantity: number; amountCents: number; userId: string; quantityClaimed: number }
+  | { type: "claim_rejected"; lotId: string; reason: string }
+  | { type: "lot_update"; lotId: string; status: LotStatus; currentBidCents: number | null; currentBidderId: string | null; currentBidderName: string | null; bidCount: number; saleMode?: SaleMode; quantity?: number; quantityClaimed?: number }
   | { type: "auction_update"; status: AuctionStatus; activeLotNumber: number | null }
   | { type: "chat_message"; id: string; userId: string; username: string; content: string; createdAt: string }
   | { type: "viewer_count"; count: number }
@@ -115,4 +134,6 @@ export type AdminMessage =
   | { type: "floor_bid"; lotId: string; amountCents: number; onBehalfOfName: string }
   | { type: "start_auction" }
   | { type: "close_auction" }
-  | { type: "quick_add_lot"; title: string; startingPriceCents: number };
+  | { type: "quick_add_lot"; title: string; startingPriceCents: number; saleMode?: SaleMode; quantity?: number; maxClaimsPerUser?: number | null }
+  | { type: "set_price"; lotId: string; priceCents: number }
+  | { type: "close_lot"; lotId: string };

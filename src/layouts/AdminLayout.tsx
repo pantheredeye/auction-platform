@@ -21,6 +21,11 @@ export function AdminLayout({ children, requestInfo }: LayoutProps) {
       currentOrganization={ctx?.currentOrganization ?? null}
       hasAdminAccess={hasAdminAccess}
       isPlatformAdmin={ctx?.user?.isPlatformAdmin === 1}
+      memberships={ctx?.user?.memberships?.map((m: any) => ({
+        organizationId: m.organizationId,
+        orgName: m.org_name,
+        role: m.role,
+      })) ?? []}
     >
       {children}
     </AdminLayoutClient>

@@ -3,15 +3,17 @@
 declare namespace Cloudflare {
 	interface GlobalProps {
 		mainModule: typeof import("./src/worker");
-		durableNamespaces: "SessionDurableObject" | "AuctionRoomDO";
+		durableNamespaces: "SessionDurableObject" | "AuctionRoomDO" | "LiveStore";
 	}
 	interface Env {
 		WEBAUTHN_APP_NAME: "auction-platform";
 		WEBAUTHN_RP_ID: "auction.digitalglue.dev" | "staging-auction.digitalglue.dev";
-		CF_STREAM_ACCOUNT_ID: "";
-		CF_STREAM_API_TOKEN: "";
+		CALLS_APP_ID: string;
+		CALLS_APP_SECRET: string;
+		CALLS_API: string;
 		SESSION_DURABLE_OBJECT: DurableObjectNamespace<import("./src/worker").SessionDurableObject>;
 		AUCTION_ROOM: DurableObjectNamespace<import("./src/worker").AuctionRoomDO>;
+		LIVE_STORE: DurableObjectNamespace<import("./src/worker").LiveStore>;
 		IMAGES: R2Bucket;
 		DB: D1Database;
 		IMPORT_QUEUE: Queue;
@@ -24,5 +26,5 @@ type StringifyValues<EnvType extends Record<string, unknown>> = {
 	[Binding in keyof EnvType]: EnvType[Binding] extends string ? EnvType[Binding] : string;
 };
 declare namespace NodeJS {
-	interface ProcessEnv extends StringifyValues<Pick<Cloudflare.Env, "WEBAUTHN_APP_NAME" | "WEBAUTHN_RP_ID" | "CF_STREAM_ACCOUNT_ID" | "CF_STREAM_API_TOKEN">> {}
+	interface ProcessEnv extends StringifyValues<Pick<Cloudflare.Env, "WEBAUTHN_APP_NAME" | "WEBAUTHN_RP_ID" | "CALLS_APP_ID" | "CALLS_APP_SECRET" | "CALLS_API">> {}
 }

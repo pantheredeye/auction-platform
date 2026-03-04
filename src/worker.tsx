@@ -51,6 +51,7 @@ import { getImage } from "@/lib/r2";
 // Export Durable Objects
 export { SessionDurableObject } from "@/session/durableObject";
 export { AuctionRoomDO } from "@/auction/durableObject";
+export { LiveStore } from "@/lib/stream/live-store";
 
 export type UserWithMemberships = User & {
   memberships: Array<
@@ -180,6 +181,167 @@ const app = defineApp([
     doRequest.headers.set("X-Is-Admin", String(isAdmin));
 
     return stub.fetch(doRequest);
+  },
+
+  // WHIP/WHEP signaling for Cloudflare Realtime SFU
+  async ({ request }) => {
+    const url = new URL(request.url);
+    const method = request.method;
+
+    // CORS preflight
+    if (method === "OPTIONS" && (url.pathname.startsWith("/ingest/") || url.pathname.startsWith("/play/"))) {
+      return new Response(null, {
+        status: 204,
+        headers: {
+          "Access-Control-Allow-Origin": "*",
+          "Access-Control-Allow-Methods": "POST, PATCH, DELETE, OPTIONS",
+          "Access-Control-Allow-Headers": "Content-Type",
+        },
+      });
+    }
+
+    const corsHeaders = {
+      "Access-Control-Allow-Origin": "*",
+    };
+
+    const callsApi = `${env.CALLS_API}/v1/apps/${env.CALLS_APP_ID}`;
+    const callsAuth = { Authorization: `Bearer ${env.CALLS_APP_SECRET}` };
+
+    // POST /ingest/:auctionId — WHIP push (auctioneer)
+    const ingestMatch = url.pathname.match(/^\/ingest\/([^/]+)$/);
+    if (ingestMatch && method === "POST") {
+      const auctionId = ingestMatch[1];
+      const offerSdp = await request.text();
+
+      // Create Calls session
+      const sessionRes = await fetch(`${callsApi}/sessions/new`, {
+        method: "POST",
+        headers: { ...callsAuth, "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      if (!sessionRes.ok) {
+        return new Response(`Calls session error: ${sessionRes.status}`, { status: 502, headers: corsHeaders });
+      }
+      const session = (await sessionRes.json()) as { sessionId: string };
+
+      // Push tracks with offer SDP
+      const tracksRes = await fetch(`${callsApi}/sessions/${session.sessionId}/tracks/new`, {
+        method: "POST",
+        headers: { ...callsAuth, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sessionDescription: { type: "offer", sdp: offerSdp },
+          autoDiscover: true,
+        }),
+      });
+      if (!tracksRes.ok) {
+        return new Response(`Calls tracks error: ${tracksRes.status}`, { status: 502, headers: corsHeaders });
+      }
+      const tracksData = (await tracksRes.json()) as {
+        sessionDescription: { type: string; sdp: string };
+        tracks: Array<{ trackName: string; mid: string }>;
+      };
+
+      // Store track locators in LiveStore DO
+      const doId = env.LIVE_STORE.idFromName(auctionId);
+      const store = env.LIVE_STORE.get(doId);
+      await store.setTracks(
+        tracksData.tracks.map((t) => ({
+          location: "local" as const,
+          sessionId: session.sessionId,
+          trackName: t.trackName,
+        })),
+      );
+
+      return new Response(tracksData.sessionDescription.sdp, {
+        status: 201,
+        headers: { ...corsHeaders, "Content-Type": "application/sdp", "X-Session-Id": session.sessionId },
+      });
+    }
+
+    // DELETE /ingest/:auctionId — cleanup
+    const ingestDeleteMatch = url.pathname.match(/^\/ingest\/([^/]+)$/);
+    if (ingestDeleteMatch && method === "DELETE") {
+      const auctionId = ingestDeleteMatch[1];
+      const doId = env.LIVE_STORE.idFromName(auctionId);
+      const store = env.LIVE_STORE.get(doId);
+      await store.deleteTracks();
+      return new Response(null, { status: 204, headers: corsHeaders });
+    }
+
+    // POST /play/:auctionId — WHEP pull (viewer)
+    const playMatch = url.pathname.match(/^\/play\/([^/]+)$/);
+    if (playMatch && method === "POST") {
+      const auctionId = playMatch[1];
+
+      // Read track locators
+      const doId = env.LIVE_STORE.idFromName(auctionId);
+      const store = env.LIVE_STORE.get(doId);
+      const tracks = await store.getTracks();
+      if (!tracks.length) {
+        return new Response("Stream not started", { status: 404, headers: corsHeaders });
+      }
+
+      const offerSdp = await request.text();
+
+      // Create viewer session
+      const sessionRes = await fetch(`${callsApi}/sessions/new`, {
+        method: "POST",
+        headers: { ...callsAuth, "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      if (!sessionRes.ok) {
+        return new Response(`Calls session error: ${sessionRes.status}`, { status: 502, headers: corsHeaders });
+      }
+      const session = (await sessionRes.json()) as { sessionId: string };
+
+      // Pull remote tracks
+      const tracksRes = await fetch(`${callsApi}/sessions/${session.sessionId}/tracks/new`, {
+        method: "POST",
+        headers: { ...callsAuth, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sessionDescription: { type: "offer", sdp: offerSdp },
+          tracks: tracks.map((t) => ({
+            location: "remote",
+            sessionId: t.sessionId,
+            trackName: t.trackName,
+          })),
+        }),
+      });
+      if (!tracksRes.ok) {
+        return new Response(`Calls tracks error: ${tracksRes.status}`, { status: 502, headers: corsHeaders });
+      }
+      const tracksData = (await tracksRes.json()) as {
+        sessionDescription: { type: string; sdp: string };
+      };
+
+      return new Response(tracksData.sessionDescription.sdp, {
+        status: 201,
+        headers: { ...corsHeaders, "Content-Type": "application/sdp", "X-Session-Id": session.sessionId },
+      });
+    }
+
+    // PATCH /play/:auctionId/:sessionId — renegotiate (WHEP spec)
+    const renegMatch = url.pathname.match(/^\/play\/([^/]+)\/([^/]+)$/);
+    if (renegMatch && method === "PATCH") {
+      const sessionId = renegMatch[2];
+      const offerSdp = await request.text();
+
+      const res = await fetch(`${callsApi}/sessions/${sessionId}/renegotiate`, {
+        method: "PUT",
+        headers: { ...callsAuth, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sessionDescription: { type: "offer", sdp: offerSdp },
+        }),
+      });
+      if (!res.ok) {
+        return new Response(`Renegotiate error: ${res.status}`, { status: 502, headers: corsHeaders });
+      }
+      const data = (await res.json()) as { sessionDescription: { sdp: string } };
+      return new Response(data.sessionDescription.sdp, {
+        status: 200,
+        headers: { ...corsHeaders, "Content-Type": "application/sdp" },
+      });
+    }
   },
 
   render(Document, [

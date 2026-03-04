@@ -14,6 +14,11 @@ import {
   ArrowLeft,
   Menu,
   Shield,
+  LayoutDashboard,
+  Building2,
+  DollarSign,
+  ChevronsUpDown,
+  Check,
   type LucideIcon,
 } from "lucide-react";
 import {
@@ -23,6 +28,13 @@ import {
   SheetTitle,
   SheetTrigger,
 } from "@/app/components/ui/sheet";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/app/components/ui/dropdown-menu";
+import { switchOrganization } from "@/app/pages/admin/server-functions/org-switch";
 
 export interface NavItem {
   href: string;
@@ -41,31 +53,45 @@ export const defaultAdminNavItems: NavItem[] = [
   { href: "/admin/settings", label: "Settings", icon: Settings },
 ];
 
+export const platformNavItems: NavItem[] = [
+  { href: "/platform", label: "Dashboard", icon: LayoutDashboard },
+  { href: "/platform/organizations", label: "Organizations", icon: Building2 },
+  { href: "/platform/revenue", label: "Revenue", icon: DollarSign },
+];
+
 interface SwitchLink {
   href: string;
   label: string;
   icon: LucideIcon;
 }
 
+const navPresets = {
+  admin: defaultAdminNavItems,
+  platform: platformNavItems,
+} as const;
+
 export function AdminLayoutClient({
   children,
   user,
   currentOrganization,
-  navItems = defaultAdminNavItems,
+  navPreset = "admin",
   title = "Admin Panel",
   backLink = { href: "/dashboard", label: "Shopper View" },
   hasAdminAccess = false,
   isPlatformAdmin = false,
+  memberships = [],
 }: {
   children: React.ReactNode;
   user: any;
   currentOrganization: any;
-  navItems?: NavItem[];
+  navPreset?: keyof typeof navPresets;
   title?: string;
   backLink?: { href: string; label: string };
   hasAdminAccess?: boolean;
   isPlatformAdmin?: boolean;
+  memberships?: { organizationId: string; orgName: string; role: string }[];
 }) {
+  const navItems = navPresets[navPreset];
   const [sheetOpen, setSheetOpen] = useState(false);
   const currentPath =
     typeof window !== "undefined" ? window.location.pathname : "";
@@ -82,6 +108,40 @@ export function AdminLayoutClient({
   if (isPlatformAdmin && title !== "Platform Admin") {
     switchLinks.push({ href: "/platform", label: "Platform", icon: Shield });
   }
+
+  const showSwitcher = memberships.length >= 2 && navPreset === "admin";
+  const currentOrgName = currentOrganization?.name ?? title;
+
+  async function handleSwitchOrg(orgId: string) {
+    await switchOrganization(orgId);
+    window.location.href = "/admin";
+  }
+
+  const orgSwitcher = showSwitcher ? (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground mt-1 w-full">
+          <span className="truncate">{currentOrgName}</span>
+          <ChevronsUpDown size={12} className="shrink-0" />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="w-56">
+        {memberships.map((m) => (
+          <DropdownMenuItem
+            key={m.organizationId}
+            onClick={() => handleSwitchOrg(m.organizationId)}
+          >
+            <span className="flex-1 truncate">{m.orgName}</span>
+            {m.organizationId === currentOrganization?.id && (
+              <Check size={14} className="shrink-0 ml-2" />
+            )}
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  ) : (
+    <p className="text-xs text-muted-foreground mt-1">{title}</p>
+  );
 
   const navContent = (
     <nav className="flex-1 p-2 space-y-1">
@@ -145,7 +205,7 @@ export function AdminLayoutClient({
           <a href={backLink.href} className="text-lg font-bold">
             M&amp;M Auctions
           </a>
-          <p className="text-xs text-muted-foreground mt-1">{title}</p>
+          {orgSwitcher}
         </div>
         {navContent}
         {footerContent}
@@ -161,7 +221,10 @@ export function AdminLayoutClient({
           </SheetTrigger>
           <SheetContent side="left" className="w-64 p-0">
             <SheetHeader className="p-4 border-b">
-              <SheetTitle className="text-left">{title}</SheetTitle>
+              <SheetTitle className="text-left">
+                {showSwitcher ? currentOrgName : title}
+              </SheetTitle>
+              {showSwitcher && orgSwitcher}
             </SheetHeader>
             {navContent}
             {footerContent}
