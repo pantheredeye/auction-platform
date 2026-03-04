@@ -16,7 +16,7 @@ import type {
 } from "@/auction/types";
 import { formatCents } from "@/lib/money";
 import { imageUrl } from "@/lib/image-url";
-import { Volume2, VolumeX } from "lucide-react";
+import { Volume2, VolumeX, ChevronDown, ChevronUp, MessageSquare, List } from "lucide-react";
 
 // ─── Audio cue via Web Audio API ─────────────────────────────────
 
@@ -428,30 +428,83 @@ export function AuctioneerConsole({ auction, initialLots }: AuctioneerConsolePro
     ? currentLotState.currentBidCents + auction.defaultIncrementCents
     : (currentLotData?.startingPriceCents ?? 0);
 
+  // ─── Collapsible panels for small screens ─────────────────────
+  const [lotsOpen, setLotsOpen] = useState(false);
+  const [chatOpen, setChatOpen] = useState(false);
+
   // ─── Render ─────────────────────────────────────────────────────
+
+  const lotQueue = (
+    <>
+      {allLots.map((lot) => {
+        const state = lots.get(lot.id);
+        const status = state?.status ?? "pending";
+        const isActive = lot.id === currentLot;
+        const isSold = status === "sold";
+        return (
+          <div
+            key={lot.id}
+            className={`p-2 rounded text-sm cursor-default ${isActive ? "bg-primary/10 border border-primary/30" : "hover:bg-muted/50"}`}
+          >
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-1.5">
+                <LotStatusIndicator status={status} />
+                <span className="font-medium">#{lot.lotNumber}</span>
+                {(state?.saleMode ?? (lot as { saleMode?: string }).saleMode ?? "english") !== "english" && (
+                  <span className="text-[9px] px-1 py-0 rounded bg-blue-500/15 text-blue-600 dark:text-blue-400">
+                    {(state?.saleMode ?? (lot as { saleMode?: string }).saleMode) === "live_sell" ? "LS" : "DU"}
+                  </span>
+                )}
+              </div>
+            </div>
+            <p className="text-xs text-muted-foreground truncate mt-0.5">{lot.title}</p>
+            <p className="text-xs font-mono mt-0.5">
+              {isSold && state?.currentBidCents != null
+                ? formatCents(state.currentBidCents)
+                : formatCents(lot.startingPriceCents)}
+            </p>
+          </div>
+        );
+      })}
+    </>
+  );
+
+  const chatPanel = (
+    <div className="space-y-2">
+      {chatMessages.length === 0 && (
+        <p className="text-xs text-muted-foreground">No messages yet</p>
+      )}
+      {chatMessages.map((msg) => (
+        <div key={msg.id} className="text-sm">
+          <span className="font-medium text-xs">{msg.username}</span>
+          <p className="text-xs text-muted-foreground">{msg.content}</p>
+        </div>
+      ))}
+    </div>
+  );
 
   return (
     <div className="flex flex-col h-[calc(100vh-4rem)]">
       {/* Header */}
-      <header className="flex items-center justify-between border-b px-4 py-2 bg-background">
-        <div className="flex items-center gap-3">
+      <header className="flex flex-wrap items-center justify-between gap-2 border-b px-4 py-2 bg-background">
+        <div className="flex items-center gap-3 min-w-0">
           <h1 className="text-lg font-semibold truncate">{auction.title}</h1>
           {isLive && (
-            <Badge variant="destructive" className="animate-pulse">
+            <Badge variant="destructive" className="animate-pulse shrink-0">
               LIVE
             </Badge>
           )}
           {!isLive && (
-            <Badge variant="secondary">{auctionStatus}</Badge>
+            <Badge variant="secondary" className="shrink-0">{auctionStatus}</Badge>
           )}
         </div>
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-3 sm:gap-4">
           <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
             <span className={`inline-block h-2 w-2 rounded-full ${statusDot}`} />
-            <span>{connectionStatus}</span>
+            <span className="hidden sm:inline">{connectionStatus}</span>
           </div>
           <div className="text-sm text-muted-foreground">
-            {viewerCount} viewer{viewerCount !== 1 ? "s" : ""}
+            {viewerCount} <span className="hidden sm:inline">viewer{viewerCount !== 1 ? "s" : ""}</span>
           </div>
           <Button
             variant="ghost"
@@ -464,46 +517,33 @@ export function AuctioneerConsole({ auction, initialLots }: AuctioneerConsolePro
         </div>
       </header>
 
-      {/* Main grid */}
-      <div className="flex-1 grid grid-cols-[280px_1fr_280px] gap-0 overflow-hidden">
-        {/* Left: Lot queue */}
-        <aside className="border-r overflow-y-auto p-3 space-y-1">
+      {/* Main grid — responsive */}
+      <div className="flex-1 grid grid-cols-1 md:grid-cols-[1fr_240px] lg:grid-cols-[240px_1fr_240px] gap-0 overflow-hidden">
+        {/* Left: Lot queue — visible lg+, collapsible on smaller */}
+        <aside className="hidden lg:block border-r overflow-y-auto p-3 space-y-1">
           <h2 className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">Lots</h2>
-          {allLots.map((lot) => {
-            const state = lots.get(lot.id);
-            const status = state?.status ?? "pending";
-            const isActive = lot.id === currentLot;
-            const isSold = status === "sold";
-            return (
-              <div
-                key={lot.id}
-                className={`p-2 rounded text-sm cursor-default ${isActive ? "bg-primary/10 border border-primary/30" : "hover:bg-muted/50"}`}
-              >
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-1.5">
-                    <LotStatusIndicator status={status} />
-                    <span className="font-medium">#{lot.lotNumber}</span>
-                    {(state?.saleMode ?? (lot as { saleMode?: string }).saleMode ?? "english") !== "english" && (
-                      <span className="text-[9px] px-1 py-0 rounded bg-blue-500/15 text-blue-600 dark:text-blue-400">
-                        {(state?.saleMode ?? (lot as { saleMode?: string }).saleMode) === "live_sell" ? "LS" : "DU"}
-                      </span>
-                    )}
-                  </div>
-                </div>
-                <p className="text-xs text-muted-foreground truncate mt-0.5">{lot.title}</p>
-                <p className="text-xs font-mono mt-0.5">
-                  {isSold && state?.currentBidCents != null
-                    ? formatCents(state.currentBidCents)
-                    : formatCents(lot.startingPriceCents)}
-                </p>
-              </div>
-            );
-          })}
+          {lotQueue}
         </aside>
 
         {/* Center: Stream + current lot + bid feed */}
         <main className="overflow-y-auto p-4 flex flex-col gap-4">
-          {/* Camera / Stream section */}
+          {/* Collapsible lots on small/medium screens */}
+          <div className="lg:hidden">
+            <button
+              onClick={() => setLotsOpen(!lotsOpen)}
+              className="flex items-center gap-2 w-full text-left text-sm font-medium text-muted-foreground hover:text-foreground py-1"
+            >
+              <List className="h-4 w-4" />
+              Lots ({allLots.length})
+              {lotsOpen ? <ChevronUp className="h-4 w-4 ml-auto" /> : <ChevronDown className="h-4 w-4 ml-auto" />}
+            </button>
+            {lotsOpen && (
+              <div className="border rounded-lg p-2 mt-1 max-h-48 overflow-y-auto space-y-1">
+                {lotQueue}
+              </div>
+            )}
+          </div>
+
           <StreamPanel
             streamStatus={streamStatus}
             videoRef={videoRef}
@@ -554,22 +594,29 @@ export function AuctioneerConsole({ auction, initialLots }: AuctioneerConsolePro
           />
 
           <BidFeedPanel entries={bidFeed} />
+
+          {/* Collapsible chat on small screens */}
+          <div className="md:hidden">
+            <button
+              onClick={() => setChatOpen(!chatOpen)}
+              className="flex items-center gap-2 w-full text-left text-sm font-medium text-muted-foreground hover:text-foreground py-1"
+            >
+              <MessageSquare className="h-4 w-4" />
+              Chat ({chatMessages.length})
+              {chatOpen ? <ChevronUp className="h-4 w-4 ml-auto" /> : <ChevronDown className="h-4 w-4 ml-auto" />}
+            </button>
+            {chatOpen && (
+              <div className="border rounded-lg p-2 mt-1 max-h-48 overflow-y-auto">
+                {chatPanel}
+              </div>
+            )}
+          </div>
         </main>
 
-        {/* Right: Chat */}
-        <aside className="border-l overflow-y-auto p-3">
+        {/* Right: Chat — visible md+, collapsible on small */}
+        <aside className="hidden md:block border-l overflow-y-auto p-3">
           <h2 className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">Chat</h2>
-          <div className="space-y-2">
-            {chatMessages.length === 0 && (
-              <p className="text-xs text-muted-foreground">No messages yet</p>
-            )}
-            {chatMessages.map((msg) => (
-              <div key={msg.id} className="text-sm">
-                <span className="font-medium text-xs">{msg.username}</span>
-                <p className="text-xs text-muted-foreground">{msg.content}</p>
-              </div>
-            ))}
-          </div>
+          {chatPanel}
         </aside>
       </div>
     </div>

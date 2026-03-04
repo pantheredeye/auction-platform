@@ -254,13 +254,14 @@ export function AdminAuctionsClient({
             <TableHead>Status</TableHead>
             <TableHead>Scheduled</TableHead>
             <TableHead>Lots</TableHead>
+            <TableHead></TableHead>
             <TableHead className="w-[60px]"></TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
           {auctions.length === 0 ? (
             <TableRow>
-              <TableCell colSpan={6} className="text-center text-muted-foreground py-8">
+              <TableCell colSpan={7} className="text-center text-muted-foreground py-8">
                 No auctions found.
               </TableCell>
             </TableRow>
@@ -276,11 +277,25 @@ export function AdminAuctionsClient({
                     </Badge>
                   </TableCell>
                   <TableCell>
-                    <span
-                      className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_COLORS[auction.status] ?? ""}`}
-                    >
-                      {auction.status}
-                    </span>
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span
+                        className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_COLORS[auction.status] ?? ""}`}
+                      >
+                        {auction.status}
+                      </span>
+                      {transitions.map((t) => (
+                        <button
+                          key={t}
+                          disabled={isPending}
+                          onClick={() =>
+                            handleTransition(auction.id, t, auction.version)
+                          }
+                          className="inline-flex items-center gap-0.5 rounded-full border px-2 py-0.5 text-[11px] font-medium text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors disabled:opacity-50"
+                        >
+                          → {t}
+                        </button>
+                      ))}
+                    </div>
                   </TableCell>
                   <TableCell className="text-muted-foreground text-sm">
                     {auction.scheduledStartAt
@@ -288,6 +303,15 @@ export function AdminAuctionsClient({
                       : "—"}
                   </TableCell>
                   <TableCell>{auction.lotCount}</TableCell>
+                  <TableCell>
+                    {(auction.status === "live" || auction.status === "closing") && (
+                      <a href={`/admin/auctions/${auction.id}/auctioneer`}>
+                        <Button size="xs" variant="default" className="bg-green-600 hover:bg-green-700 text-white gap-1">
+                          <Radio size={12} /> Control Room
+                        </Button>
+                      </a>
+                    )}
+                  </TableCell>
                   <TableCell>
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
@@ -306,39 +330,11 @@ export function AdminAuctionsClient({
                             <ListOrdered size={14} /> Lots
                           </a>
                         </DropdownMenuItem>
-                        {auction.status === "live" && (
-                          <DropdownMenuItem asChild>
-                            <a href={`/admin/auctions/${auction.id}/auctioneer`}>
-                              <Radio size={14} /> Control Room
-                            </a>
-                          </DropdownMenuItem>
-                        )}
                         <DropdownMenuItem
                           onClick={() => handleClone(auction.id)}
                         >
                           <Copy size={14} /> Clone
                         </DropdownMenuItem>
-
-                        {transitions.length > 0 && (
-                          <>
-                            <DropdownMenuSeparator />
-                            {transitions.map((t) => (
-                              <DropdownMenuItem
-                                key={t}
-                                onClick={() =>
-                                  handleTransition(
-                                    auction.id,
-                                    t,
-                                    auction.version,
-                                  )
-                                }
-                              >
-                                <ArrowRight size={14} /> → {t}
-                              </DropdownMenuItem>
-                            ))}
-                          </>
-                        )}
-
                         {auction.status === "draft" && (
                           <>
                             <DropdownMenuSeparator />

@@ -216,8 +216,7 @@ const app = defineApp([
       // Create Calls session
       const sessionRes = await fetch(`${callsApi}/sessions/new`, {
         method: "POST",
-        headers: { ...callsAuth, "Content-Type": "application/json" },
-        body: JSON.stringify({}),
+        headers: callsAuth,
       });
       if (!sessionRes.ok) {
         return new Response(`Calls session error: ${sessionRes.status}`, { status: 502, headers: corsHeaders });
