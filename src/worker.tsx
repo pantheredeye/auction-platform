@@ -276,6 +276,7 @@ const app = defineApp([
       const doId = env.LIVE_STORE.idFromName(auctionId);
       const store = env.LIVE_STORE.get(doId);
       const tracks = await store.getTracks();
+      console.log("[WHEP] tracks from DO:", JSON.stringify(tracks));
       if (!tracks.length) {
         return new Response("Stream not started", { status: 404, headers: corsHeaders });
       }
@@ -285,8 +286,7 @@ const app = defineApp([
       // Create viewer session
       const sessionRes = await fetch(`${callsApi}/sessions/new`, {
         method: "POST",
-        headers: { ...callsAuth, "Content-Type": "application/json" },
-        body: JSON.stringify({}),
+        headers: callsAuth,
       });
       if (!sessionRes.ok) {
         return new Response(`Calls session error: ${sessionRes.status}`, { status: 502, headers: corsHeaders });
@@ -306,10 +306,12 @@ const app = defineApp([
           })),
         }),
       });
+      const tracksResBody = await tracksRes.text();
+      console.log("[WHEP] tracks/new status:", tracksRes.status, "body:", tracksResBody);
       if (!tracksRes.ok) {
-        return new Response(`Calls tracks error: ${tracksRes.status}`, { status: 502, headers: corsHeaders });
+        return new Response(`Calls tracks error: ${tracksRes.status} ${tracksResBody}`, { status: 502, headers: corsHeaders });
       }
-      const tracksData = (await tracksRes.json()) as {
+      const tracksData = JSON.parse(tracksResBody) as {
         sessionDescription: { type: string; sdp: string };
       };
 

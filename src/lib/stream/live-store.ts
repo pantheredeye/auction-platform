@@ -7,17 +7,15 @@ export interface TrackLocator {
 }
 
 export class LiveStore extends DurableObject {
-  private tracks: TrackLocator[] = [];
-
   async setTracks(tracks: TrackLocator[]): Promise<void> {
-    this.tracks = tracks;
+    await this.ctx.storage.put("tracks", tracks);
   }
 
   async getTracks(): Promise<TrackLocator[]> {
-    return this.tracks;
+    return (await this.ctx.storage.get<TrackLocator[]>("tracks")) ?? [];
   }
 
   async deleteTracks(): Promise<void> {
-    this.tracks = [];
+    await this.ctx.storage.delete("tracks");
   }
 }

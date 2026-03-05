@@ -101,8 +101,8 @@ export async function verifyPassword(
 export function validatePasswordStrength(password: string): PasswordValidation {
   const errors: string[] = [];
 
-  if (password.length < 12) {
-    errors.push("Password must be at least 12 characters");
+  if (password.length < 8) {
+    errors.push("Password must be at least 8 characters");
   }
   if (!/[a-z]/.test(password)) {
     errors.push("Password must contain lowercase letters");
@@ -122,8 +122,8 @@ export function validatePasswordStrength(password: string): PasswordValidation {
 
 export function getPasswordStrength(password: string): number {
   let strength = 0;
+  if (password.length >= 8) strength++;
   if (password.length >= 12) strength++;
-  if (password.length >= 16) strength++;
   if (/[a-z]/.test(password) && /[A-Z]/.test(password)) strength++;
   if (/[0-9]/.test(password)) strength++;
   if (/[^a-zA-Z0-9]/.test(password)) strength++;

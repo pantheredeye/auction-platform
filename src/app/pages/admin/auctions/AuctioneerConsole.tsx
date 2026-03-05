@@ -16,6 +16,7 @@ import type {
 } from "@/auction/types";
 import { formatCents } from "@/lib/money";
 import { imageUrl } from "@/lib/image-url";
+import { transitionAuctionStatus } from "./server-functions/auctions";
 import { Volume2, VolumeX, ChevronDown, ChevronUp, MessageSquare, List } from "lucide-react";
 
 // ─── Audio cue via Web Audio API ─────────────────────────────────
@@ -101,6 +102,16 @@ interface AuctioneerConsoleProps {
   initialLots: LotWithItems[];
 }
 
+const VALID_TRANSITIONS: Record<string, string[]> = {
+  draft: ["scheduled", "preview", "live"],
+  scheduled: ["preview", "live", "draft"],
+  preview: ["live", "draft"],
+  live: ["closing", "closed"],
+  closing: ["closed"],
+  closed: ["settled"],
+  settled: ["archived"],
+};
+
 // ─── Component ──────────────────────────────────────────────────────
 
 export function AuctioneerConsole({ auction, initialLots }: AuctioneerConsoleProps) {
@@ -135,6 +146,27 @@ export function AuctioneerConsole({ auction, initialLots }: AuctioneerConsolePro
       ws.send(JSON.stringify(msg));
     }
   }, []);
+
+  const handleAuctionTransition = useCallback(async (toStatus: string) => {
+    try {
+      if (toStatus === "live") {
+        sendMessage({ type: "start_auction" });
+      } else if (toStatus === "closed") {
+        sendMessage({ type: "close_auction" });
+        // Stop stream + clean up tracks if still live
+        if (pcRef.current) {
+          pcRef.current.close();
+          pcRef.current = null;
+          setStreamStatus("previewing");
+        }
+        fetch(`/ingest/${auction.id}`, { method: "DELETE" }).catch(() => {});
+      } else {
+        await transitionAuctionStatus(auction.id, toStatus, undefined, auction.version);
+      }
+    } catch (err: any) {
+      toast.error(err?.message ?? "Failed to transition auction");
+    }
+  }, [auction.id, auction.version, sendMessage]);
 
   const startCamera = useCallback(async () => {
     try {
@@ -225,13 +257,19 @@ export function AuctioneerConsole({ auction, initialLots }: AuctioneerConsolePro
       pcRef.current.close();
       pcRef.current = null;
     }
+    // Clean up tracks in LiveStore DO
+    fetch(`/ingest/${auction.id}`, { method: "DELETE" }).catch(() => {});
     setStreamStatus("previewing");
-  }, []);
+  }, [auction.id]);
 
   // Cleanup camera/stream on unmount
   useEffect(() => {
     return () => {
-      if (pcRef.current) pcRef.current.close();
+      if (pcRef.current) {
+        pcRef.current.close();
+        // Best-effort cleanup of tracks in DO on unmount
+        fetch(`/ingest/${auction.id}`, { method: "DELETE" }).catch(() => {});
+      }
       if (mediaStreamRef.current) {
         for (const track of mediaStreamRef.current.getTracks()) track.stop();
       }
@@ -497,6 +535,15 @@ export function AuctioneerConsole({ auction, initialLots }: AuctioneerConsolePro
           {!isLive && (
             <Badge variant="secondary" className="shrink-0">{auctionStatus}</Badge>
           )}
+          {(VALID_TRANSITIONS[auctionStatus] || []).map((t) => (
+            <button
+              key={t}
+              onClick={() => handleAuctionTransition(t)}
+              className="inline-flex items-center gap-0.5 rounded-full border px-2 py-0.5 text-[11px] font-medium text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
+            >
+              → {t}
+            </button>
+          ))}
         </div>
         <div className="flex items-center gap-3 sm:gap-4">
           <div className="flex items-center gap-1.5 text-sm text-muted-foreground">

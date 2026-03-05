@@ -23,7 +23,7 @@ import type {
 } from "@/auction/types";
 import { formatCents } from "@/lib/money";
 import { imageUrl } from "@/lib/image-url";
-import { Eye, MessageCircle, Volume2, VolumeX } from "lucide-react";
+import { Eye, MessageCircle, Share2, Volume2, VolumeX } from "lucide-react";
 
 // ─── Types ──────────────────────────────────────────────────────────
 
@@ -371,6 +371,26 @@ export function AuctionRoomClient({
             <Eye className="h-4 w-4" />
             <span>{viewerCount}</span>
           </div>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8"
+            onClick={async () => {
+              const url = window.location.href;
+              if (navigator.share) {
+                try {
+                  await navigator.share({ title: auction.title, url });
+                } catch {
+                  // user cancelled
+                }
+              } else {
+                await navigator.clipboard.writeText(url);
+                toast.success("Link copied to clipboard");
+              }
+            }}
+          >
+            <Share2 className="h-4 w-4" />
+          </Button>
         </div>
       </header>
 
@@ -898,6 +918,9 @@ function WhepPlayer({ whepUrl }: { whepUrl: string }) {
       pcRef.current.close();
       pcRef.current = null;
     }
+    if (videoRef.current) {
+      videoRef.current.srcObject = null;
+    }
   }, []);
 
   const connect = useCallback(async (url: string) => {
@@ -913,12 +936,18 @@ function WhepPlayer({ whepUrl }: { whepUrl: string }) {
       pc.addTransceiver("audio", { direction: "recvonly" });
 
       pc.ontrack = (event) => {
-        if (videoRef.current && event.streams[0]) {
-          videoRef.current.srcObject = event.streams[0];
+        console.log("[WHEP] ontrack:", event.track.kind, "readyState:", event.track.readyState, "streams:", event.streams.length);
+        if (!videoRef.current) return;
+        // Each track may arrive in its own stream — accumulate into one MediaStream
+        if (!videoRef.current.srcObject) {
+          videoRef.current.srcObject = new MediaStream();
         }
+        (videoRef.current.srcObject as MediaStream).addTrack(event.track);
+        console.log("[WHEP] stream tracks:", (videoRef.current.srcObject as MediaStream).getTracks().map(t => `${t.kind}:${t.readyState}`));
       };
 
       pc.onconnectionstatechange = () => {
+        console.log("[WHEP] connectionState:", pc.connectionState, "iceConnectionState:", pc.iceConnectionState);
         if (!mountedRef.current) return;
         const state = pc.connectionState;
         if (state === "connected") {

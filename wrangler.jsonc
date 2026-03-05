@@ -88,6 +88,7 @@
 	"vars": {
 		"WEBAUTHN_APP_NAME": "auction-platform",
 		"WEBAUTHN_RP_ID": "auction.digitalglue.dev",
+		"CALLS_APP_ID": "0b55ac866d840480c10cf74a36915901",
 		"CALLS_API": "https://rtc.live.cloudflare.com"
 	},
 	"env": {
@@ -154,8 +155,7 @@
 			"vars": {
 				"WEBAUTHN_APP_NAME": "auction-platform",
 				"WEBAUTHN_RP_ID": "staging-auction.digitalglue.dev",
-				"CALLS_APP_ID": "",
-				"CALLS_APP_SECRET": "",
+				"CALLS_APP_ID": "0b55ac866d840480c10cf74a36915901",
 				"CALLS_API": "https://rtc.live.cloudflare.com"
 			}
 		}
