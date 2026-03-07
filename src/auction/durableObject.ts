@@ -6,6 +6,7 @@ import type {
   AdminMessage,
   AuctionRoomState,
   BufferedBidEvent,
+  BufferedChatEvent,
   ClientMessage,
   LotState,
   ServerMessage,
@@ -49,6 +50,7 @@ export class AuctionRoomDO extends DurableObject<Cloudflare.Env> {
   private stateLoaded = false;
   private idempotencyKeys = new Set<string>();
   private bidBuffer: BufferedBidEvent[] = [];
+  private chatBuffer: BufferedChatEvent[] = [];
   private chatRateLimits = new Map<string, number>();
 
   constructor(ctx: DurableObjectState, env: Cloudflare.Env) {
@@ -573,14 +575,28 @@ export class AuctionRoomDO extends DurableObject<Cloudflare.Env> {
     // Truncate content to 500 chars
     const content = msg.content.slice(0, 500);
 
-    this.broadcast({
-      type: "chat_message",
+    const chatEvent: BufferedChatEvent = {
       id: crypto.randomUUID(),
+      auctionId: this.state.auctionId,
       userId,
       username,
       content,
       createdAt: new Date().toISOString(),
+    };
+
+    this.broadcast({
+      type: "chat_message",
+      id: chatEvent.id,
+      userId,
+      username,
+      content,
+      createdAt: chatEvent.createdAt,
     });
+
+    this.chatBuffer.push(chatEvent);
+    if (this.chatBuffer.length >= 10) {
+      this.flushChatBuffer();
+    }
   }
 
   // ─── Admin message handling ──────────────────────────────────────
@@ -835,6 +851,8 @@ export class AuctionRoomDO extends DurableObject<Cloudflare.Env> {
 
     this.state.status = "closed";
     await this.persistState();
+    await this.flushBidBuffer();
+    await this.flushChatBuffer();
     this.broadcast({
       type: "auction_update",
       status: this.state.status,
@@ -1167,6 +1185,18 @@ export class AuctionRoomDO extends DurableObject<Cloudflare.Env> {
         this.bidBuffer.map((event) => ({ body: event })),
       );
       this.bidBuffer = [];
+    } catch {
+      // Keep events in buffer for retry on next flush
+    }
+  }
+
+  private async flushChatBuffer() {
+    if (this.chatBuffer.length === 0) return;
+    try {
+      await this.env.CHAT_EVENTS_QUEUE.sendBatch(
+        this.chatBuffer.map((event) => ({ body: event })),
+      );
+      this.chatBuffer = [];
     } catch {
       // Keep events in buffer for retry on next flush
     }
