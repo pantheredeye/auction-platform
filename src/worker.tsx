@@ -14,6 +14,7 @@ import { PublicLayout } from "@/layouts/PublicLayout";
 import { AuthenticatedLayout } from "@/layouts/AuthenticatedLayout";
 import { AdminLayout } from "@/layouts/AdminLayout";
 import { PlatformLayout } from "@/layouts/PlatformLayout";
+import { LiveLayout } from "@/layouts/LiveLayout";
 import { Landing } from "@/app/pages/Landing";
 import { Dashboard } from "@/app/pages/Dashboard";
 import { Placeholder } from "@/app/pages/Placeholder";
@@ -402,6 +403,7 @@ const app = defineApp([
       "/platform",
       layout(PlatformLayout, [route("/", [requirePlatformAdmin, Placeholder])]),
     ),
+    ...prefix("/live", layout(LiveLayout, [])),
   ]),
 ]);
 
