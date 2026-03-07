@@ -160,8 +160,22 @@ export function LiveViewerClient({ auction, guest }: LiveViewerClientProps) {
           autoPlay
           playsInline
           muted={muted}
-          className="w-full h-full object-contain"
+          className="w-full h-full object-cover"
         />
+
+        {/* Unmute overlay */}
+        {muted && streamStatus === "live" && (
+          <button
+            type="button"
+            onClick={() => setMuted(false)}
+            className="absolute inset-0 z-10 flex items-center justify-center bg-black/60 cursor-pointer"
+            aria-label="Tap to hear audio"
+          >
+            <span className="text-white text-lg font-semibold">
+              Tap to hear audio
+            </span>
+          </button>
+        )}
 
         {/* Stream status overlays */}
         {streamStatus === "connecting" && (
