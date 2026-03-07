@@ -3,7 +3,7 @@ import { defineApp } from "rwsdk/worker";
 import { env } from "cloudflare:workers";
 
 import { Document } from "@/app/Document";
-import { setCommonHeaders } from "@/app/headers";
+import { setCommonHeaders, setLiveCSP } from "@/app/headers";
 import { sessions } from "@/session/store";
 import { db } from "@/db";
 import { getOrCreateGuestId } from "@/app/lib/guest";
@@ -406,7 +406,7 @@ const app = defineApp([
       "/platform",
       layout(PlatformLayout, [route("/", [requirePlatformAdmin, Placeholder])]),
     ),
-    ...prefix("/live", layout(LiveLayout, [route("/:slug", [LivePage])])),
+    ...prefix("/live", layout(LiveLayout, [route("/:slug", [setLiveCSP(), LivePage])])),
   ]),
 ]);
 

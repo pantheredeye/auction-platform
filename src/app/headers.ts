@@ -30,3 +30,15 @@ export const setCommonHeaders =
       `default-src 'self'; script-src 'self' 'unsafe-eval' 'nonce-${nonce}' https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; connect-src 'self' wss:; media-src 'self' blob:; frame-ancestors 'self'; frame-src 'self' https://challenges.cloudflare.com; object-src 'none';`,
     );
   };
+
+/**
+ * CSP tailored for /live/* routes: WHEP playback + WebSocket, no Turnstile.
+ */
+export const setLiveCSP =
+  (): RouteMiddleware =>
+  ({ response, rw: { nonce } }) => {
+    response.headers.set(
+      "Content-Security-Policy",
+      `default-src 'self'; script-src 'self' 'unsafe-eval' 'nonce-${nonce}'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; connect-src 'self' wss:; media-src 'self' blob:; frame-ancestors 'self'; object-src 'none';`,
+    );
+  };
