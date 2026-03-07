@@ -71,6 +71,10 @@
 			{
 				"binding": "BID_EVENTS_QUEUE",
 				"queue": "auction-bid-events"
+			},
+			{
+				"binding": "CHAT_EVENTS_QUEUE",
+				"queue": "auction-chat-events"
 			}
 		],
 		"consumers": [
@@ -79,6 +83,12 @@
 			},
 			{
 				"queue": "auction-bid-events",
+				"max_batch_size": 50,
+				"max_batch_timeout": 5,
+				"max_retries": 5
+			},
+			{
+				"queue": "auction-chat-events",
 				"max_batch_size": 50,
 				"max_batch_timeout": 5,
 				"max_retries": 5
@@ -132,6 +142,10 @@
 					{
 						"binding": "BID_EVENTS_QUEUE",
 						"queue": "auction-bid-events-staging"
+					},
+					{
+						"binding": "CHAT_EVENTS_QUEUE",
+						"queue": "auction-chat-events-staging"
 					}
 				],
 				"consumers": [
@@ -140,6 +154,12 @@
 					},
 					{
 						"queue": "auction-bid-events-staging",
+						"max_batch_size": 50,
+						"max_batch_timeout": 5,
+						"max_retries": 5
+					},
+					{
+						"queue": "auction-chat-events-staging",
 						"max_batch_size": 50,
 						"max_batch_timeout": 5,
 						"max_retries": 5
