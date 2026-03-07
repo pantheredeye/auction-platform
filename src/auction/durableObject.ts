@@ -27,6 +27,7 @@ export interface SocketAttachment {
   userId: string;
   username: string;
   isAdmin: boolean;
+  isGuest: boolean;
 }
 
 // ─── Serializable state for ctx.storage ─────────────────────────────
@@ -176,6 +177,7 @@ export class AuctionRoomDO extends DurableObject<Cloudflare.Env> {
     const userId = request.headers.get("X-User-Id") ?? "anonymous";
     const username = request.headers.get("X-Username") ?? "Anonymous";
     const isAdmin = request.headers.get("X-Is-Admin") === "true";
+    const isGuest = request.headers.get("X-Is-Guest") === "true";
 
     const tags = [userId];
     if (isAdmin) tags.push("admin");
@@ -185,6 +187,7 @@ export class AuctionRoomDO extends DurableObject<Cloudflare.Env> {
       userId,
       username,
       isAdmin,
+      isGuest,
     } satisfies SocketAttachment);
 
     this.state.connectedUsers.add(userId);

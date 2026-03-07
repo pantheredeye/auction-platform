@@ -104,7 +104,30 @@ export interface BufferedBidEvent {
   createdAt: string;
 }
 
+export interface BufferedChatEvent {
+  id: string;
+  auctionId: string;
+  userId: string;
+  username: string;
+  content: string;
+  createdAt: string;
+}
+
 // ─── WebSocket messages ─────────────────────────────────────────────
+
+export interface ChatMessage {
+  type: "chat_message";
+  id: string;
+  userId: string;
+  username: string;
+  content: string;
+  createdAt: string;
+}
+
+export interface ChatHistoryMessage {
+  type: "chat_history";
+  messages: ChatMessage[];
+}
 
 export type ClientMessage =
   | { type: "bid"; lotId: string; amountCents: number; idempotencyKey: string }
