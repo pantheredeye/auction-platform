@@ -1,5 +1,6 @@
 import type { RequestInfo } from "rwsdk/worker";
 import { getAuctionBySlug } from "./server-functions/live";
+import { LiveViewerClient } from "./LiveViewerClient";
 
 export async function LivePage({ ctx, params }: RequestInfo) {
   const slug = params!.slug as string;
@@ -50,14 +51,5 @@ export async function LivePage({ ctx, params }: RequestInfo) {
 
   const guest = ctx.guest;
 
-  return (
-    <div data-live-auction data-slug={slug}>
-      {/* LiveViewerClient will replace this once implemented */}
-      <div className="flex items-center justify-center min-h-dvh">
-        <p className="text-lg text-zinc-400">
-          Live auction: {auction.title}
-        </p>
-      </div>
-    </div>
-  );
+  return <LiveViewerClient auction={auction} guest={guest} />;
 }
