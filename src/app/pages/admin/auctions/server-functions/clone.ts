@@ -42,6 +42,8 @@ export async function cloneAuction(sourceId: string) {
       extensionSeconds: source.extensionSeconds,
       streamProviderId: source.streamProviderId,
       streamUrl: null,
+      recording_key: null,
+      recording_status: "none",
       auctioneerId: source.auctioneerId,
       createdByUserId: userId,
       clonedFromAuctionId: sourceId,

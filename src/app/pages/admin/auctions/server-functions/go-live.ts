@@ -35,6 +35,8 @@ export async function quickGoLive() {
       extensionSeconds: 0,
       streamProviderId: null,
       streamUrl: null,
+      recording_key: null,
+      recording_status: "none",
       auctioneerId: userId,
       createdByUserId: userId,
       clonedFromAuctionId: null,

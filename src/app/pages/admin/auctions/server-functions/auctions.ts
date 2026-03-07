@@ -116,6 +116,8 @@ export async function createAuction(data: {
       extensionSeconds: data.extensionSeconds ?? 0,
       streamProviderId: null,
       streamUrl: null,
+      recording_key: null,
+      recording_status: "none",
       auctioneerId: data.auctioneerId ?? null,
       createdByUserId: userId,
       clonedFromAuctionId: null,

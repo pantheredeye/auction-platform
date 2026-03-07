@@ -142,6 +142,8 @@ export interface AuctionsTable {
   extensionSeconds: number;
   streamProviderId: string | null;
   streamUrl: string | null;
+  recording_key: string | null;
+  recording_status: string;
   auctioneerId: string | null;
   createdByUserId: string;
   clonedFromAuctionId: string | null;
