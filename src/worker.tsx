@@ -43,6 +43,9 @@ import { AuctioneerPage } from "@/app/pages/admin/auctions/AuctioneerPage";
 import { AuctionsListPage } from "@/app/pages/auctions/AuctionsListPage";
 import { AuctionRoomPage } from "@/app/pages/auctions/AuctionRoomPage";
 
+// Live pages (viewer-facing)
+import { LivePage } from "@/app/pages/live/LivePage";
+
 // Queue consumers
 import { processShopifyImport } from "@/queue/shopify-import";
 import { processBidEvent } from "@/queue/bid-events";
@@ -403,7 +406,7 @@ const app = defineApp([
       "/platform",
       layout(PlatformLayout, [route("/", [requirePlatformAdmin, Placeholder])]),
     ),
-    ...prefix("/live", layout(LiveLayout, [])),
+    ...prefix("/live", layout(LiveLayout, [route("/:slug", [LivePage])])),
   ]),
 ]);
 
