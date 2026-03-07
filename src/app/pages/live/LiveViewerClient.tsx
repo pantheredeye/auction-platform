@@ -1,10 +1,20 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback } from "react";
+import type { ServerMessage, AuctionStatus, LotStatus } from "@/auction/types";
 
 // ─── Types ──────────────────────────────────────────────────────────
 
 type StreamStatus = "connecting" | "live" | "waiting" | "ended" | "error";
+
+interface CurrentLotData {
+  id: string;
+  status: LotStatus;
+  currentBidCents: number | null;
+  currentBidderId: string | null;
+  currentBidderName: string | null;
+  bidCount: number;
+}
 
 export interface LiveAuctionData {
   id: string;
@@ -49,10 +59,31 @@ interface LiveViewerClientProps {
 
 // ─── Component ──────────────────────────────────────────────────────
 
+// Map DO auction status to viewer stream status
+function auctionStatusToStreamStatus(status: AuctionStatus, hasActiveStream: boolean): StreamStatus {
+  switch (status) {
+    case "live":
+    case "closing":
+      return hasActiveStream ? "live" : "connecting";
+    case "draft":
+    case "scheduled":
+    case "preview":
+      return "waiting";
+    case "closed":
+    case "settled":
+    case "archived":
+      return "ended";
+    default:
+      return "waiting";
+  }
+}
+
 export function LiveViewerClient({ auction, guest }: LiveViewerClientProps) {
   const [streamStatus, setStreamStatus] = useState<StreamStatus>("connecting");
   const [muted, setMuted] = useState(true);
   const [viewerCount, setViewerCount] = useState(0);
+  const [auctionStatus, setAuctionStatus] = useState<AuctionStatus>(auction.status as AuctionStatus);
+  const [currentLot, setCurrentLot] = useState<CurrentLotData | null>(null);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const pcRef = useRef<RTCPeerConnection | null>(null);
@@ -60,7 +91,55 @@ export function LiveViewerClient({ auction, guest }: LiveViewerClientProps) {
   const reconnectAttempt = useRef(0);
   const mountedRef = useRef(true);
 
+  // Track whether WHEP stream is actually connected
+  const whepConnectedRef = useRef(false);
+
   const whepUrl = `/play/${auction.id}`;
+
+  // ─── WS message handler ──────────────────────────────────────────
+
+  const handleServerMessage = useCallback((msg: ServerMessage) => {
+    switch (msg.type) {
+      case "auction_update": {
+        const status = msg.status as AuctionStatus;
+        setAuctionStatus(status);
+        // Update stream status based on auction status + current WHEP state
+        const derived = auctionStatusToStreamStatus(status, whepConnectedRef.current);
+        // Don't override "live" if WHEP is connected, don't override "error"
+        setStreamStatus((prev) => {
+          if (prev === "error") return prev;
+          if (prev === "live" && derived === "connecting") return "live"; // WHEP already connected
+          return derived;
+        });
+        break;
+      }
+      case "viewer_count":
+        setViewerCount(msg.count);
+        break;
+      case "lot_update": {
+        const isActive = msg.status === "active" || msg.status === "going_once" || msg.status === "going_twice";
+        if (isActive) {
+          setCurrentLot({
+            id: msg.lotId,
+            status: msg.status,
+            currentBidCents: msg.currentBidCents ?? null,
+            currentBidderId: msg.currentBidderId ?? null,
+            currentBidderName: msg.currentBidderName ?? null,
+            bidCount: msg.bidCount,
+          });
+        } else {
+          // Clear current lot if it's the one that just changed to non-active
+          setCurrentLot((prev) => (prev?.id === msg.lotId ? null : prev));
+        }
+        break;
+      }
+      case "chat_history":
+      case "chat_message":
+      case "pong":
+        // Handled by future chat implementation
+        break;
+    }
+  }, []);
 
   const cleanupConnection = useCallback(() => {
     if (reconnectTimer.current) {
@@ -101,8 +180,10 @@ export function LiveViewerClient({ auction, guest }: LiveViewerClientProps) {
         const state = pc.connectionState;
         if (state === "connected") {
           reconnectAttempt.current = 0;
+          whepConnectedRef.current = true;
           setStreamStatus("live");
         } else if (state === "failed" || state === "disconnected" || state === "closed") {
+          whepConnectedRef.current = false;
           scheduleReconnect(url);
         }
       };
@@ -118,6 +199,7 @@ export function LiveViewerClient({ auction, guest }: LiveViewerClientProps) {
 
       if (resp.status === 404) {
         if (pcRef.current) { pcRef.current.close(); pcRef.current = null; }
+        whepConnectedRef.current = false;
         setStreamStatus("waiting");
         scheduleReconnect(url);
         return;
@@ -157,6 +239,67 @@ export function LiveViewerClient({ auction, guest }: LiveViewerClientProps) {
       cleanupConnection();
     };
   }, [whepUrl, connectWhep, cleanupConnection]);
+
+  // ─── WebSocket lifecycle ──────────────────────────────────────────
+
+  useEffect(() => {
+    const wsRef = { current: null as WebSocket | null };
+    let wsReconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    let wsReconnectAttempt = 0;
+    let alive = true;
+
+    function connectWs() {
+      if (!alive) return;
+      const protocol = location.protocol === "https:" ? "wss:" : "ws:";
+      const url = `${protocol}//${location.host}/ws/auction/${auction.id}`;
+      const ws = new WebSocket(url);
+      wsRef.current = ws;
+
+      ws.onopen = () => {
+        if (!alive) { ws.close(); return; }
+        wsReconnectAttempt = 0;
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const msg: ServerMessage = JSON.parse(event.data);
+          handleServerMessage(msg);
+        } catch {
+          // ignore malformed
+        }
+      };
+
+      ws.onclose = () => {
+        if (!alive) return;
+        scheduleWsReconnect();
+      };
+
+      ws.onerror = () => {};
+    }
+
+    function scheduleWsReconnect() {
+      if (!alive) return;
+      const delay = Math.min(1000 * Math.pow(2, wsReconnectAttempt), 15000);
+      wsReconnectAttempt++;
+      wsReconnectTimer = setTimeout(connectWs, delay);
+    }
+
+    const pingInterval = setInterval(() => {
+      const ws = wsRef.current;
+      if (ws?.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: "ping" }));
+      }
+    }, 30000);
+
+    connectWs();
+
+    return () => {
+      alive = false;
+      clearInterval(pingInterval);
+      if (wsReconnectTimer) clearTimeout(wsReconnectTimer);
+      wsRef.current?.close();
+    };
+  }, [auction.id, handleServerMessage]);
 
   return (
     <div className="flex flex-col min-h-dvh bg-black">
