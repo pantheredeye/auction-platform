@@ -70,6 +70,7 @@ declare module "rwsdk/worker" {
   interface DefaultAppContext {
     session: Session | null;
     user: UserWithMemberships | null;
+    guest: { id: string; name: string | null } | null;
     currentOrganization: {
       id: string;
       name: string;
@@ -105,6 +106,7 @@ const app = defineApp([
   async ({ ctx, request }) => {
     const session = await sessions.load(request);
     ctx.session = session || null;
+    ctx.guest = null;
 
     if (ctx.session?.userId) {
       const user = await db
