@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 
 // ─── Types ──────────────────────────────────────────────────────────
 
@@ -55,6 +55,101 @@ export function LiveViewerClient({ auction, guest }: LiveViewerClientProps) {
   const [viewerCount, setViewerCount] = useState(0);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const pcRef = useRef<RTCPeerConnection | null>(null);
+  const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const mountedRef = useRef(true);
+
+  const whepUrl = `/play/${auction.id}`;
+
+  const cleanupConnection = useCallback(() => {
+    if (reconnectTimer.current) {
+      clearTimeout(reconnectTimer.current);
+      reconnectTimer.current = null;
+    }
+    if (pcRef.current) {
+      pcRef.current.close();
+      pcRef.current = null;
+    }
+    if (videoRef.current) {
+      videoRef.current.srcObject = null;
+    }
+  }, []);
+
+  const connectWhep = useCallback(async (url: string) => {
+    if (!mountedRef.current) return;
+    cleanupConnection();
+    setStreamStatus("connecting");
+
+    try {
+      const pc = new RTCPeerConnection();
+      pcRef.current = pc;
+
+      pc.addTransceiver("video", { direction: "recvonly" });
+      pc.addTransceiver("audio", { direction: "recvonly" });
+
+      pc.ontrack = (event) => {
+        if (!videoRef.current) return;
+        if (!videoRef.current.srcObject) {
+          videoRef.current.srcObject = new MediaStream();
+        }
+        (videoRef.current.srcObject as MediaStream).addTrack(event.track);
+      };
+
+      pc.onconnectionstatechange = () => {
+        if (!mountedRef.current) return;
+        const state = pc.connectionState;
+        if (state === "connected") {
+          setStreamStatus("live");
+        } else if (state === "failed" || state === "disconnected" || state === "closed") {
+          setStreamStatus("error");
+          scheduleReconnect(url);
+        }
+      };
+
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+
+      const resp = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/sdp" },
+        body: offer.sdp,
+      });
+
+      if (resp.status === 404) {
+        if (pcRef.current) { pcRef.current.close(); pcRef.current = null; }
+        setStreamStatus("waiting");
+        scheduleReconnect(url);
+        return;
+      }
+
+      if (!resp.ok) {
+        throw new Error(`WHEP ${resp.status}`);
+      }
+
+      const answerSdp = await resp.text();
+      await pc.setRemoteDescription({ type: "answer", sdp: answerSdp });
+    } catch {
+      if (!mountedRef.current) return;
+      setStreamStatus("error");
+      scheduleReconnect(url);
+    }
+  }, [cleanupConnection]);
+
+  const scheduleReconnect = useCallback((url: string) => {
+    if (!mountedRef.current) return;
+    reconnectTimer.current = setTimeout(() => {
+      if (mountedRef.current) connectWhep(url);
+    }, 5000);
+  }, [connectWhep]);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    connectWhep(whepUrl);
+    return () => {
+      mountedRef.current = false;
+      cleanupConnection();
+    };
+  }, [whepUrl, connectWhep, cleanupConnection]);
 
   return (
     <div className="flex flex-col min-h-dvh bg-black">
