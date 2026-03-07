@@ -8,7 +8,7 @@ export async function LivePage({ ctx, params }: RequestInfo) {
   if (!auction) {
     return (
       <div className="flex items-center justify-center min-h-dvh">
-        <p className="text-lg text-zinc-400">Auction not found</p>
+        <p className="text-lg font-medium text-zinc-200">Auction not found</p>
       </div>
     );
   }
@@ -20,7 +20,9 @@ export async function LivePage({ ctx, params }: RequestInfo) {
   if (!isLive && !isScheduled) {
     return (
       <div className="flex items-center justify-center min-h-dvh">
-        <p className="text-lg text-zinc-400">This auction has ended</p>
+        <p className="text-lg font-medium text-zinc-200">
+          This auction has ended
+        </p>
       </div>
     );
   }
@@ -28,10 +30,10 @@ export async function LivePage({ ctx, params }: RequestInfo) {
   if (isScheduled) {
     return (
       <div className="flex flex-col items-center justify-center min-h-dvh gap-3">
-        <h1 className="text-2xl font-bold">{auction.title}</h1>
-        <p className="text-lg text-zinc-400">Coming soon</p>
+        <h1 className="text-2xl font-bold text-white">{auction.title}</h1>
+        <p className="text-lg font-medium text-zinc-200">Starting soon</p>
         {auction.scheduledStartAt && (
-          <p className="text-sm text-zinc-500">
+          <p className="text-lg font-medium text-zinc-300">
             Starts{" "}
             {new Date(auction.scheduledStartAt).toLocaleDateString(undefined, {
               weekday: "long",
