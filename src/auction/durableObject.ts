@@ -51,6 +51,7 @@ export class AuctionRoomDO extends DurableObject<Cloudflare.Env> {
   private idempotencyKeys = new Set<string>();
   private bidBuffer: BufferedBidEvent[] = [];
   private chatBuffer: BufferedChatEvent[] = [];
+  private chatHistory: BufferedChatEvent[] = [];
   private chatRateLimits = new Map<string, number>();
 
   constructor(ctx: DurableObjectState, env: Cloudflare.Env) {
@@ -596,6 +597,11 @@ export class AuctionRoomDO extends DurableObject<Cloudflare.Env> {
       content,
       createdAt: chatEvent.createdAt,
     });
+
+    this.chatHistory.push(chatEvent);
+    if (this.chatHistory.length > 50) {
+      this.chatHistory.shift();
+    }
 
     this.chatBuffer.push(chatEvent);
     if (this.chatBuffer.length >= 10) {
@@ -1180,6 +1186,18 @@ export class AuctionRoomDO extends DurableObject<Cloudflare.Env> {
     this.sendToSocket(ws, {
       type: "viewer_count",
       count: this.state.viewerCount,
+    });
+
+    this.sendToSocket(ws, {
+      type: "chat_history",
+      messages: this.chatHistory.map((e) => ({
+        type: "chat_message" as const,
+        id: e.id,
+        userId: e.userId,
+        username: e.username,
+        content: e.content,
+        createdAt: e.createdAt,
+      })),
     });
   }
 

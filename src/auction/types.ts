@@ -145,6 +145,7 @@ export type ServerMessage =
   | { type: "chat_message"; id: string; userId: string; username: string; content: string; createdAt: string }
   | { type: "viewer_count"; count: number }
   | { type: "pong" }
+  | { type: "chat_history"; messages: ChatMessage[] }
   | { type: "error"; message: string };
 
 export type AdminMessage =
