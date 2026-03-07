@@ -302,96 +302,101 @@ export function LiveViewerClient({ auction, guest }: LiveViewerClientProps) {
   }, [auction.id, handleServerMessage]);
 
   return (
-    <div className="flex flex-col min-h-dvh bg-black">
-      {/* Video container */}
-      <div className="relative flex-1 bg-black">
-        <video
-          ref={videoRef}
-          autoPlay
-          playsInline
-          muted={muted}
-          className="w-full h-full object-cover"
-        />
+    <div className="flex flex-col md:flex-row min-h-dvh bg-black">
+      {/* Video section: flex-1 on mobile (top), 70% on desktop (left) */}
+      <div className="flex flex-col flex-1 md:flex-none md:w-[70%]">
+        <div className="relative flex-1 bg-black">
+          <video
+            ref={videoRef}
+            autoPlay
+            playsInline
+            muted={muted}
+            className="absolute inset-0 w-full h-full object-cover"
+          />
 
-        {/* Unmute overlay */}
-        {muted && streamStatus === "live" && (
-          <button
-            type="button"
-            onClick={() => setMuted(false)}
-            className="absolute inset-0 z-10 flex items-center justify-center bg-black/60 cursor-pointer"
-            aria-label="Tap to hear audio"
-          >
-            <span className="text-white text-lg font-semibold">
-              Tap to hear audio
-            </span>
-          </button>
-        )}
-
-        {/* LIVE badge */}
-        {streamStatus === "live" && (
-          <div className="absolute top-4 left-4 z-20">
-            <span className="inline-flex items-center gap-1.5 rounded bg-green-600 px-2.5 py-1 text-sm font-semibold text-white uppercase tracking-wide">
-              <span className="inline-block h-2 w-2 rounded-full bg-white animate-pulse" aria-hidden="true" />
-              Live
-            </span>
-          </div>
-        )}
-
-        {/* Stream status overlays */}
-        {streamStatus === "connecting" && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-4">
-            <div
-              className="h-10 w-10 rounded-full border-4 border-white/30 border-t-white animate-spin"
-              role="status"
-              aria-label="Connecting to stream"
-            />
-            <p className="text-white text-lg font-medium">
-              Connecting to stream...
-            </p>
-          </div>
-        )}
-        {streamStatus === "waiting" && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-3">
-            <h2 className="text-2xl font-bold text-white">{auction.title}</h2>
-            <p className="text-white text-lg font-medium">
-              Stream starting soon
-            </p>
-          </div>
-        )}
-        {streamStatus === "ended" && (
-          <div className="absolute inset-0 flex items-center justify-center">
-            <p className="text-white text-lg font-semibold">
-              Auction has ended
-            </p>
-          </div>
-        )}
-        {streamStatus === "error" && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-4">
-            <p className="text-white text-lg font-medium">
-              Something went wrong. Try refreshing.
-            </p>
+          {/* Unmute overlay */}
+          {muted && streamStatus === "live" && (
             <button
               type="button"
-              onClick={() => { reconnectAttempt.current = 0; connectWhep(whepUrl); }}
-              className="h-12 min-w-12 px-6 rounded-lg bg-white text-black text-lg font-semibold cursor-pointer hover:bg-zinc-200 transition-colors"
+              onClick={() => setMuted(false)}
+              className="absolute inset-0 z-10 flex items-center justify-center bg-black/60 cursor-pointer"
+              aria-label="Tap to hear audio"
             >
-              Retry
+              <span className="text-white text-lg font-semibold">
+                Tap to hear audio
+              </span>
             </button>
-          </div>
-        )}
-      </div>
+          )}
 
-      {/* Status area */}
-      <div className="shrink-0 bg-zinc-900 px-4 py-3">
-        <div className="flex items-center justify-between">
-          <h1 className="text-lg font-semibold text-white truncate">
-            {auction.title}
-          </h1>
-          <div className="flex items-center gap-2 text-sm text-zinc-400">
-            <span>{viewerCount} watching</span>
+          {/* LIVE badge */}
+          {streamStatus === "live" && (
+            <div className="absolute top-4 left-4 z-20">
+              <span className="inline-flex items-center gap-1.5 rounded bg-green-600 px-2.5 py-1 text-sm font-semibold text-white uppercase tracking-wide">
+                <span className="inline-block h-2 w-2 rounded-full bg-white animate-pulse" aria-hidden="true" />
+                Live
+              </span>
+            </div>
+          )}
+
+          {/* Stream status overlays */}
+          {streamStatus === "connecting" && (
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-4">
+              <div
+                className="h-10 w-10 rounded-full border-4 border-white/30 border-t-white animate-spin"
+                role="status"
+                aria-label="Connecting to stream"
+              />
+              <p className="text-white text-lg font-medium">
+                Connecting to stream...
+              </p>
+            </div>
+          )}
+          {streamStatus === "waiting" && (
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-3">
+              <h2 className="text-2xl font-bold text-white">{auction.title}</h2>
+              <p className="text-white text-lg font-medium">
+                Stream starting soon
+              </p>
+            </div>
+          )}
+          {streamStatus === "ended" && (
+            <div className="absolute inset-0 flex items-center justify-center">
+              <p className="text-white text-lg font-semibold">
+                Auction has ended
+              </p>
+            </div>
+          )}
+          {streamStatus === "error" && (
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-4">
+              <p className="text-white text-lg font-medium">
+                Something went wrong. Try refreshing.
+              </p>
+              <button
+                type="button"
+                onClick={() => { reconnectAttempt.current = 0; connectWhep(whepUrl); }}
+                className="h-12 min-w-12 px-6 rounded-lg bg-white text-black text-lg font-semibold cursor-pointer hover:bg-zinc-200 transition-colors"
+              >
+                Retry
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* Status area */}
+        <div className="shrink-0 bg-zinc-900 px-4 py-3">
+          <div className="flex items-center justify-between">
+            <h1 className="text-lg font-semibold text-white truncate">
+              {auction.title}
+            </h1>
+            <div className="flex items-center gap-2 text-sm text-zinc-400">
+              <span>{viewerCount} watching</span>
+            </div>
           </div>
         </div>
       </div>
+
+      {/* Chat section: placeholder for chat panel (30% on desktop) */}
+      <div className="shrink-0 h-[40dvh] md:h-auto md:flex-1 bg-zinc-950" />
     </div>
   );
 }
