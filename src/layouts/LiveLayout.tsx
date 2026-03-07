@@ -1,7 +1,6 @@
 import type { LayoutProps } from "rwsdk/router";
+import { LiveLayoutClient } from "./LiveLayoutClient";
 
 export function LiveLayout({ children }: LayoutProps) {
-  return (
-    <div className="min-h-screen bg-neutral-950 text-white">{children}</div>
-  );
+  return <LiveLayoutClient>{children}</LiveLayoutClient>;
 }
