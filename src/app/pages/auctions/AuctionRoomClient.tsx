@@ -904,6 +904,7 @@ function WhepPlayer({ whepUrl }: { whepUrl: string }) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const reconnectAttempt = useRef(0);
   const mountedRef = useRef(true);
 
   const [muted, setMuted] = useState(true);
@@ -951,9 +952,9 @@ function WhepPlayer({ whepUrl }: { whepUrl: string }) {
         if (!mountedRef.current) return;
         const state = pc.connectionState;
         if (state === "connected") {
+          reconnectAttempt.current = 0;
           setStatus("live");
         } else if (state === "failed" || state === "disconnected" || state === "closed") {
-          setStatus("error");
           scheduleReconnect(url);
         }
       };
@@ -983,16 +984,22 @@ function WhepPlayer({ whepUrl }: { whepUrl: string }) {
       await pc.setRemoteDescription({ type: "answer", sdp: answerSdp });
     } catch {
       if (!mountedRef.current) return;
-      setStatus("error");
       scheduleReconnect(url);
     }
   }, [cleanup]);
 
   const scheduleReconnect = useCallback((url: string) => {
     if (!mountedRef.current) return;
+    if (reconnectAttempt.current >= 5) {
+      setStatus("error");
+      return;
+    }
+    const delay = Math.min(1000 * Math.pow(2, reconnectAttempt.current), 10000);
+    reconnectAttempt.current++;
+    setStatus("connecting");
     reconnectTimer.current = setTimeout(() => {
       if (mountedRef.current) connect(url);
-    }, 5000);
+    }, delay);
   }, [connect]);
 
   useEffect(() => {

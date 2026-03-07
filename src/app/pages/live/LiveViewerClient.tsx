@@ -57,6 +57,7 @@ export function LiveViewerClient({ auction, guest }: LiveViewerClientProps) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const reconnectAttempt = useRef(0);
   const mountedRef = useRef(true);
 
   const whepUrl = `/play/${auction.id}`;
@@ -99,9 +100,9 @@ export function LiveViewerClient({ auction, guest }: LiveViewerClientProps) {
         if (!mountedRef.current) return;
         const state = pc.connectionState;
         if (state === "connected") {
+          reconnectAttempt.current = 0;
           setStreamStatus("live");
         } else if (state === "failed" || state === "disconnected" || state === "closed") {
-          setStreamStatus("error");
           scheduleReconnect(url);
         }
       };
@@ -130,16 +131,22 @@ export function LiveViewerClient({ auction, guest }: LiveViewerClientProps) {
       await pc.setRemoteDescription({ type: "answer", sdp: answerSdp });
     } catch {
       if (!mountedRef.current) return;
-      setStreamStatus("error");
       scheduleReconnect(url);
     }
   }, [cleanupConnection]);
 
   const scheduleReconnect = useCallback((url: string) => {
     if (!mountedRef.current) return;
+    if (reconnectAttempt.current >= 5) {
+      setStreamStatus("error");
+      return;
+    }
+    const delay = Math.min(1000 * Math.pow(2, reconnectAttempt.current), 10000);
+    reconnectAttempt.current++;
+    setStreamStatus("connecting");
     reconnectTimer.current = setTimeout(() => {
       if (mountedRef.current) connectWhep(url);
-    }, 5000);
+    }, delay);
   }, [connectWhep]);
 
   useEffect(() => {
@@ -222,7 +229,7 @@ export function LiveViewerClient({ auction, guest }: LiveViewerClientProps) {
             </p>
             <button
               type="button"
-              onClick={() => connectWhep(whepUrl)}
+              onClick={() => { reconnectAttempt.current = 0; connectWhep(whepUrl); }}
               className="h-12 min-w-12 px-6 rounded-lg bg-white text-black text-lg font-semibold cursor-pointer hover:bg-zinc-200 transition-colors"
             >
               Retry
