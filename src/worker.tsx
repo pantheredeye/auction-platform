@@ -175,15 +175,11 @@ const app = defineApp([
       return; // fall through to render
     }
 
-    if (!ctx.user) {
+    if (!ctx.user && !ctx.guest) {
       return new Response("Unauthorized", { status: 401 });
     }
 
     const auctionId = wsMatch[1];
-    const isAdmin =
-      ctx.currentOrganization?.role === "super_admin" ||
-      ctx.currentOrganization?.role === "admin" ||
-      ctx.currentOrganization?.role === "auctioneer";
 
     const doId = env.AUCTION_ROOM.idFromName(auctionId);
     const stub = env.AUCTION_ROOM.get(doId);
@@ -192,9 +188,21 @@ const app = defineApp([
       method: request.method,
       headers: new Headers(request.headers),
     });
-    doRequest.headers.set("X-User-Id", ctx.user.id);
-    doRequest.headers.set("X-Username", ctx.user.displayName ?? ctx.user.name ?? ctx.user.username);
-    doRequest.headers.set("X-Is-Admin", String(isAdmin));
+
+    if (ctx.user) {
+      const isAdmin =
+        ctx.currentOrganization?.role === "super_admin" ||
+        ctx.currentOrganization?.role === "admin" ||
+        ctx.currentOrganization?.role === "auctioneer";
+      doRequest.headers.set("X-User-Id", ctx.user.id);
+      doRequest.headers.set("X-Username", ctx.user.displayName ?? ctx.user.name ?? ctx.user.username);
+      doRequest.headers.set("X-Is-Admin", String(isAdmin));
+    } else {
+      doRequest.headers.set("X-User-Id", ctx.guest!.id);
+      doRequest.headers.set("X-Username", ctx.guest!.name || "Guest");
+      doRequest.headers.set("X-Is-Admin", "false");
+      doRequest.headers.set("X-Is-Guest", "true");
+    }
 
     return stub.fetch(doRequest);
   },
