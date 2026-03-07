@@ -44,6 +44,7 @@ import { AuctionRoomPage } from "@/app/pages/auctions/AuctionRoomPage";
 // Queue consumers
 import { processShopifyImport } from "@/queue/shopify-import";
 import { processBidEvent } from "@/queue/bid-events";
+import { processChatEvent } from "@/queue/chat-events";
 
 // R2 image serving
 import { getImage } from "@/lib/r2";
@@ -397,6 +398,11 @@ export default {
             message.body as import("@/auction/types").BufferedBidEvent,
             env,
           );
+        } else if (batch.queue.startsWith("auction-chat-events")) {
+          await processChatEvent(
+            message.body as import("@/auction/types").BufferedChatEvent,
+            env,
+          );
         } else {
           const body = message.body as { type?: string };
           if (body?.type === "shopify-import") {
@@ -412,9 +418,11 @@ export default {
       } catch (e) {
         console.error(`[queue:${batch.queue}] Error processing message`, e);
         message.retry({
-          delaySeconds: batch.queue.startsWith("auction-bid-events")
-            ? Math.pow(2, message.attempts) * 5
-            : undefined,
+          delaySeconds:
+            batch.queue.startsWith("auction-bid-events") ||
+            batch.queue.startsWith("auction-chat-events")
+              ? Math.pow(2, message.attempts) * 5
+              : undefined,
         });
       }
     }
