@@ -177,31 +177,56 @@ export function LiveViewerClient({ auction, guest }: LiveViewerClientProps) {
           </button>
         )}
 
+        {/* LIVE badge */}
+        {streamStatus === "live" && (
+          <div className="absolute top-4 left-4 z-20">
+            <span className="inline-flex items-center gap-1.5 rounded bg-green-600 px-2.5 py-1 text-sm font-semibold text-white uppercase tracking-wide">
+              <span className="inline-block h-2 w-2 rounded-full bg-white animate-pulse" aria-hidden="true" />
+              Live
+            </span>
+          </div>
+        )}
+
         {/* Stream status overlays */}
         {streamStatus === "connecting" && (
-          <div className="absolute inset-0 flex items-center justify-center">
-            <p className="text-white/60 text-lg animate-pulse">
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-4">
+            <div
+              className="h-10 w-10 rounded-full border-4 border-white/30 border-t-white animate-spin"
+              role="status"
+              aria-label="Connecting to stream"
+            />
+            <p className="text-white text-lg font-medium">
               Connecting to stream...
             </p>
           </div>
         )}
         {streamStatus === "waiting" && (
-          <div className="absolute inset-0 flex items-center justify-center">
-            <p className="text-white/50 text-lg animate-pulse">
-              Waiting for stream to start...
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-3">
+            <h2 className="text-2xl font-bold text-white">{auction.title}</h2>
+            <p className="text-white text-lg font-medium">
+              Stream starting soon
             </p>
           </div>
         )}
         {streamStatus === "ended" && (
           <div className="absolute inset-0 flex items-center justify-center">
-            <p className="text-white/50 text-lg">Stream has ended</p>
+            <p className="text-white text-lg font-semibold">
+              Auction has ended
+            </p>
           </div>
         )}
         {streamStatus === "error" && (
-          <div className="absolute inset-0 flex items-center justify-center">
-            <p className="text-white/50 text-lg">
-              Stream disconnected — reconnecting...
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-4">
+            <p className="text-white text-lg font-medium">
+              Something went wrong. Try refreshing.
             </p>
+            <button
+              type="button"
+              onClick={() => connectWhep(whepUrl)}
+              className="h-12 min-w-12 px-6 rounded-lg bg-white text-black text-lg font-semibold cursor-pointer hover:bg-zinc-200 transition-colors"
+            >
+              Retry
+            </button>
           </div>
         )}
       </div>
