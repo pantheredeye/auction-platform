@@ -2,7 +2,7 @@
 import { db } from "@/db";
 import { requestInfo } from "rwsdk/worker";
 import { logAudit } from "@/lib/audit";
-import { slugify } from "@/lib/slug";
+import { generateSlug } from "@/lib/slug";
 import { encodeCursor, decodeCursor } from "@/lib/pagination";
 import { assertAuctionTransition } from "@/auction/state-machine";
 import type { AuctionStatus } from "@/auction/types";
@@ -104,7 +104,7 @@ export async function createAuction(data: {
       organizationId: orgId,
       type: data.type,
       title: data.title,
-      slug: slugify(data.title),
+      slug: generateSlug(data.title),
       description: data.description ?? null,
       status: "draft",
       scheduledStartAt: data.scheduledStartAt ?? null,
@@ -184,7 +184,7 @@ export async function updateAuction(
   if (data.type !== undefined) updates.type = data.type;
   if (data.title !== undefined) {
     updates.title = data.title;
-    updates.slug = slugify(data.title);
+    updates.slug = generateSlug(data.title);
   }
   if (data.description !== undefined) updates.description = data.description;
   if (data.scheduledStartAt !== undefined)
