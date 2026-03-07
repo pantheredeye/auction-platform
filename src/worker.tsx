@@ -6,6 +6,7 @@ import { Document } from "@/app/Document";
 import { setCommonHeaders } from "@/app/headers";
 import { sessions } from "@/session/store";
 import { db } from "@/db";
+import { getOrCreateGuestId } from "@/app/lib/guest";
 import type { Session } from "@/session/durableObject";
 import type { User, Membership, Organization } from "@/db";
 
@@ -103,7 +104,7 @@ const app = defineApp([
   },
 
   // Load session and populate user/org context
-  async ({ ctx, request }) => {
+  async ({ ctx, request, response }) => {
     const session = await sessions.load(request);
     ctx.session = session || null;
     ctx.guest = null;
@@ -149,6 +150,18 @@ const app = defineApp([
               isApproved: membership.isApproved === 1,
             };
           }
+        }
+      }
+    }
+
+    // Populate guest identity for /live/* routes when not authenticated
+    if (!ctx.user) {
+      const url = new URL(request.url);
+      if (url.pathname.startsWith("/live/") || url.pathname.startsWith("/ws/auction/")) {
+        const guest = getOrCreateGuestId(request);
+        ctx.guest = { id: guest.guestId, name: guest.guestName };
+        if (guest.setCookieHeader) {
+          response.headers.append("Set-Cookie", guest.setCookieHeader);
         }
       }
     }
