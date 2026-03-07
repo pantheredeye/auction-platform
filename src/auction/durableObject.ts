@@ -201,7 +201,7 @@ export class AuctionRoomDO extends DurableObject<Cloudflare.Env> {
     return new Response(null, { status: 101, webSocket: client });
   }
 
-  // ─── Alarm handler (lot countdown) ────────────────────────────
+  // ─── Alarm handler (lot countdown + chat flush) ────────────────
 
   async alarm() {
     await this.ensureState();
@@ -210,12 +210,8 @@ export class AuctionRoomDO extends DurableObject<Cloudflare.Env> {
       ? this.state.lots.get(this.state.currentLotId)
       : null;
 
-    // Race guard: lot was reset to active (anti-snipe) before alarm fired
-    if (!lot || (lot.status !== "going_once" && lot.status !== "going_twice")) {
-      return;
-    }
-
-    if (lot.status === "going_once") {
+    // Lot countdown logic
+    if (lot && lot.status === "going_once") {
       lot.status = "going_twice";
       lot.sequence++;
       await this.persistState();
@@ -228,13 +224,13 @@ export class AuctionRoomDO extends DurableObject<Cloudflare.Env> {
         currentBidderName: lot.currentBidderName,
         bidCount: lot.bidCount,
       });
-      // Set alarm for sold/passed transition
+      // Set alarm for sold/passed transition (5s); chat flush piggybacks
+      await this.flushChatBuffer();
       await this.ctx.storage.setAlarm(Date.now() + 5000);
       return;
     }
 
-    if (lot.status === "going_twice") {
-      // Determine sold vs passed
+    if (lot && lot.status === "going_twice") {
       if (lot.bidCount > 0 && lot.currentBidderId) {
         lot.status = "sold";
       } else {
@@ -252,6 +248,14 @@ export class AuctionRoomDO extends DurableObject<Cloudflare.Env> {
         currentBidderName: lot.currentBidderName,
         bidCount: lot.bidCount,
       });
+    }
+
+    // Periodic chat buffer flush
+    await this.flushChatBuffer();
+
+    // Re-schedule 30s alarm if auction still active
+    if (this.state.status === "live") {
+      await this.scheduleChatFlushAlarm();
     }
   }
 
@@ -597,6 +601,9 @@ export class AuctionRoomDO extends DurableObject<Cloudflare.Env> {
     if (this.chatBuffer.length >= 10) {
       this.flushChatBuffer();
     }
+
+    // Ensure a flush alarm is scheduled so buffer isn't lost on hibernation
+    this.scheduleChatFlushAlarm();
   }
 
   // ─── Admin message handling ──────────────────────────────────────
@@ -1174,6 +1181,15 @@ export class AuctionRoomDO extends DurableObject<Cloudflare.Env> {
       type: "viewer_count",
       count: this.state.viewerCount,
     });
+  }
+
+  // ─── Chat flush alarm ────────────────────────────────────────
+
+  private async scheduleChatFlushAlarm() {
+    const existing = await this.ctx.storage.getAlarm();
+    if (!existing) {
+      await this.ctx.storage.setAlarm(Date.now() + 30_000);
+    }
   }
 
   // ─── Buffer flush ─────────────────────────────────────────────
