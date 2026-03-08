@@ -807,6 +807,12 @@ export function AuctioneerConsole({ auction, initialLots }: AuctioneerConsolePro
             </>
           )}
 
+          {/* Share section */}
+          <div className="rounded-lg border bg-muted/30 p-3 space-y-1.5">
+            <h2 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Share</h2>
+            <p className="text-sm font-mono break-all select-all">{`${typeof window !== "undefined" ? window.location.origin : ""}/live/${auction.slug}`}</p>
+          </div>
+
           {/* Collapsible chat on small screens */}
           <div className="md:hidden">
             <button
