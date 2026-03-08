@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect, useCallback } from "react";
 import type { ServerMessage, AuctionStatus, LotStatus, ChatMessage } from "@/auction/types";
+import { formatCents, dollarsToCents } from "@/lib/money";
 import { setGuestName } from "./server-functions/guest";
 
 // ─── Types ──────────────────────────────────────────────────────────
@@ -101,6 +102,7 @@ function ChatPanel({
   nameSubmitting,
   currentLot,
   onBidTap,
+  bidInputElement,
 }: {
   messages: ChatMessage[];
   guest: GuestInfo | null;
@@ -113,6 +115,7 @@ function ChatPanel({
   nameSubmitting: boolean;
   currentLot: CurrentLotData | null;
   onBidTap: () => void;
+  bidInputElement?: React.ReactNode;
 }) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
@@ -229,7 +232,9 @@ function ChatPanel({
         </div>
       )}
 
-      <ChatInput guest={guest} onSend={onSend} onNamePrompt={onNamePrompt} currentLot={currentLot} onBidTap={onBidTap} />
+      {bidInputElement || (
+        <ChatInput guest={guest} onSend={onSend} onNamePrompt={onNamePrompt} currentLot={currentLot} onBidTap={onBidTap} />
+      )}
     </div>
   );
 }
@@ -333,6 +338,95 @@ function ChatInput({
   );
 }
 
+// ─── Bid Input ──────────────────────────────────────────────────────
+
+function BidInput({
+  currentLot,
+  auction,
+  onSubmit,
+  onCancel,
+}: {
+  currentLot: CurrentLotData;
+  auction: LiveAuctionData;
+  onSubmit: (amountCents: number) => void;
+  onCancel: () => void;
+}) {
+  const [value, setValue] = useState("");
+  const inputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    requestAnimationFrame(() => inputRef.current?.focus());
+  }, []);
+
+  const currentBidCents = currentLot.currentBidCents ?? auction.activeLot?.startingPriceCents ?? 0;
+  const incrementCents = auction.activeLot?.incrementCents ?? auction.defaultIncrementCents;
+  const minimumBidCents = currentLot.currentBidCents != null
+    ? currentBidCents + incrementCents
+    : auction.activeLot?.startingPriceCents ?? incrementCents;
+
+  const enteredCents = value ? dollarsToCents(parseFloat(value)) : 0;
+  const isValid = !isNaN(enteredCents) && enteredCents >= minimumBidCents && value.trim() !== "";
+
+  const handleSubmit = () => {
+    if (!isValid) return;
+    onSubmit(enteredCents);
+  };
+
+  return (
+    <div className="shrink-0 border-t border-zinc-700 p-2">
+      <div className="flex items-center gap-2 mb-2 px-1">
+        <span className="text-lg text-zinc-300">
+          Current {formatCents(currentBidCents)}
+        </span>
+        <span className="text-zinc-500" aria-hidden="true">—</span>
+        <span className="text-lg text-zinc-400">
+          Minimum {formatCents(minimumBidCents)}
+        </span>
+      </div>
+      <div className="flex gap-2">
+        <button
+          type="button"
+          onClick={onCancel}
+          aria-label="Cancel bid"
+          className="shrink-0 h-12 px-4 rounded-lg border border-zinc-600 bg-zinc-900 text-lg text-zinc-300 cursor-pointer hover:border-zinc-500 transition-colors"
+        >
+          Cancel
+        </button>
+        <input
+          ref={inputRef}
+          type="number"
+          inputMode="decimal"
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              handleSubmit();
+            }
+            if (e.key === "Escape") {
+              e.preventDefault();
+              onCancel();
+            }
+          }}
+          placeholder={`$${(minimumBidCents / 100).toFixed(2)}`}
+          step="0.01"
+          min={minimumBidCents / 100}
+          aria-label="Bid amount in dollars"
+          className="flex-1 min-w-0 h-12 px-4 rounded-lg border border-zinc-600 bg-zinc-900 text-lg text-white placeholder:text-zinc-500 focus:outline-none focus:ring-2 focus:ring-zinc-400"
+        />
+        <button
+          type="button"
+          onClick={handleSubmit}
+          disabled={!isValid}
+          className="shrink-0 h-12 px-5 rounded-lg bg-white text-black text-lg font-semibold cursor-pointer hover:bg-zinc-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          Bid
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export function LiveViewerClient({ auction, guest: initialGuest }: LiveViewerClientProps) {
   const [streamStatus, setStreamStatus] = useState<StreamStatus>("connecting");
   const [muted, setMuted] = useState(true);
@@ -341,6 +435,7 @@ export function LiveViewerClient({ auction, guest: initialGuest }: LiveViewerCli
   const [currentLot, setCurrentLot] = useState<CurrentLotData | null>(null);
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [guest, setGuest] = useState<GuestInfo | null>(initialGuest);
+  const [bidMode, setBidMode] = useState(false);
 
   // Incrementing this forces the WS effect to re-run (close + reconnect)
   const [wsReconnectTrigger, setWsReconnectTrigger] = useState(0);
@@ -390,7 +485,13 @@ export function LiveViewerClient({ auction, guest: initialGuest }: LiveViewerCli
           });
         } else {
           // Clear current lot if it's the one that just changed to non-active
-          setCurrentLot((prev) => (prev?.id === msg.lotId ? null : prev));
+          setCurrentLot((prev) => {
+            if (prev?.id === msg.lotId) {
+              setBidMode(false);
+              return null;
+            }
+            return prev;
+          });
         }
         break;
       }
@@ -512,6 +613,23 @@ export function LiveViewerClient({ auction, guest: initialGuest }: LiveViewerCli
       ws.send(JSON.stringify({ type: "chat", content }));
     }
   }, []);
+
+  const sendBid = useCallback((amountCents: number) => {
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN || !currentLot) return;
+    const idempotencyKey = `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+    ws.send(JSON.stringify({
+      type: "bid",
+      lotId: currentLot.id,
+      amountCents,
+      idempotencyKey,
+    }));
+    setBidMode(false);
+  }, [currentLot]);
+
+  const handleBidTap = useCallback(() => {
+    if (currentLot) setBidMode(true);
+  }, [currentLot]);
 
   const [showNamePrompt, setShowNamePrompt] = useState(false);
   const [nameValue, setNameValue] = useState("");
@@ -722,7 +840,15 @@ export function LiveViewerClient({ auction, guest: initialGuest }: LiveViewerCli
         onNameSubmit={handleNameSubmit}
         nameSubmitting={nameSubmitting}
         currentLot={currentLot}
-        onBidTap={() => {/* TODO: wire to bid flow */}}
+        onBidTap={handleBidTap}
+        bidInputElement={bidMode && currentLot ? (
+          <BidInput
+            currentLot={currentLot}
+            auction={auction}
+            onSubmit={sendBid}
+            onCancel={() => setBidMode(false)}
+          />
+        ) : undefined}
       />
     </div>
   );
