@@ -135,6 +135,8 @@ export function AuctioneerConsole({ auction, initialLots }: AuctioneerConsolePro
   const videoRef = useRef<HTMLVideoElement>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const pcRef = useRef<RTCPeerConnection | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const recordedChunksRef = useRef<Blob[]>([]);
 
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectAttempt = useRef(0);
@@ -154,7 +156,11 @@ export function AuctioneerConsole({ auction, initialLots }: AuctioneerConsolePro
         sendMessage({ type: "start_auction" });
       } else if (toStatus === "closed") {
         sendMessage({ type: "close_auction" });
-        // Stop stream + clean up tracks if still live
+        // Stop recorder + stream + clean up tracks
+        if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+          mediaRecorderRef.current.stop();
+          mediaRecorderRef.current = null;
+        }
         if (pcRef.current) {
           pcRef.current.close();
           pcRef.current = null;
@@ -209,6 +215,37 @@ export function AuctioneerConsole({ auction, initialLots }: AuctioneerConsolePro
     setStreamStatus("idle");
   }, []);
 
+  const startMediaRecorder = useCallback(() => {
+    if (!mediaStreamRef.current) return;
+    recordedChunksRef.current = [];
+    const mimeType = MediaRecorder.isTypeSupported("video/webm;codecs=vp9,opus")
+      ? "video/webm;codecs=vp9,opus"
+      : MediaRecorder.isTypeSupported("video/webm;codecs=vp8,opus")
+        ? "video/webm;codecs=vp8,opus"
+        : "video/webm";
+    try {
+      const recorder = new MediaRecorder(mediaStreamRef.current, {
+        mimeType,
+        videoBitsPerSecond: 2_500_000,
+      });
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) recordedChunksRef.current.push(e.data);
+      };
+      recorder.start(5000); // 5s timeslice chunks
+      mediaRecorderRef.current = recorder;
+    } catch (err) {
+      console.error("MediaRecorder start failed:", err);
+      // Non-fatal: stream still works without recording
+    }
+  }, []);
+
+  const stopMediaRecorder = useCallback(() => {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+      mediaRecorderRef.current.stop();
+      mediaRecorderRef.current = null;
+    }
+  }, []);
+
   const startStream = useCallback(async () => {
     if (!mediaStreamRef.current) return;
     setStreamStatus("connecting");
@@ -237,6 +274,12 @@ export function AuctioneerConsole({ auction, initialLots }: AuctioneerConsolePro
       const answerSdp = await resp.text();
       await pc.setRemoteDescription({ type: "answer", sdp: answerSdp });
 
+      // Start MediaRecorder reusing same getUserMedia stream
+      startMediaRecorder();
+
+      // Transition auction status to live
+      handleAuctionTransition("live");
+
       pc.onconnectionstatechange = () => {
         if (pc.connectionState === "connected") {
           setStreamStatus("live");
@@ -251,15 +294,17 @@ export function AuctioneerConsole({ auction, initialLots }: AuctioneerConsolePro
     } catch (err) {
       console.error("Stream start failed:", err);
       toast.error("Failed to start stream");
+      stopMediaRecorder();
       if (pcRef.current) {
         pcRef.current.close();
         pcRef.current = null;
       }
       setStreamStatus("previewing");
     }
-  }, [auction.id]);
+  }, [auction.id, startMediaRecorder, stopMediaRecorder, handleAuctionTransition]);
 
   const stopStream = useCallback(() => {
+    stopMediaRecorder();
     if (pcRef.current) {
       pcRef.current.close();
       pcRef.current = null;
@@ -267,16 +312,19 @@ export function AuctioneerConsole({ auction, initialLots }: AuctioneerConsolePro
     // Clean up tracks in LiveStore DO
     fetch(`/ingest/${auction.id}`, { method: "DELETE" }).catch(() => {});
     setStreamStatus("previewing");
-  }, [auction.id]);
+  }, [auction.id, stopMediaRecorder]);
 
   // Auto-start camera preview on mount
   useEffect(() => {
     startCamera();
   }, [startCamera]);
 
-  // Cleanup camera/stream on unmount
+  // Cleanup camera/stream/recorder on unmount
   useEffect(() => {
     return () => {
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+        mediaRecorderRef.current.stop();
+      }
       if (pcRef.current) {
         pcRef.current.close();
         // Best-effort cleanup of tracks in DO on unmount
