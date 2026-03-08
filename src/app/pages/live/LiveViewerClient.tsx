@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback } from "react";
-import type { ServerMessage, AuctionStatus, LotStatus } from "@/auction/types";
+import type { ServerMessage, AuctionStatus, LotStatus, ChatMessage } from "@/auction/types";
 
 // ─── Types ──────────────────────────────────────────────────────────
 
@@ -78,12 +78,60 @@ function auctionStatusToStreamStatus(status: AuctionStatus, hasActiveStream: boo
   }
 }
 
+// ─── Chat Panel ──────────────────────────────────────────────────────
+
+function ChatPanel({ messages }: { messages: ChatMessage[] }) {
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const bottomRef = useRef<HTMLDivElement | null>(null);
+  const autoScrollRef = useRef(true);
+
+  // Detect manual scroll-up to pause auto-scroll
+  const handleScroll = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    // Consider "at bottom" if within 48px of the bottom
+    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 48;
+    autoScrollRef.current = atBottom;
+  }, []);
+
+  // Auto-scroll on new messages
+  useEffect(() => {
+    if (autoScrollRef.current) {
+      bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [messages]);
+
+  return (
+    <div className="flex flex-col shrink-0 h-[40dvh] md:h-auto md:flex-1 bg-zinc-950">
+      <div
+        ref={scrollRef}
+        onScroll={handleScroll}
+        className="flex-1 overflow-y-auto p-3 space-y-2"
+      >
+        {messages.length === 0 && (
+          <p className="text-lg text-zinc-500 font-medium text-center py-8">
+            No messages yet
+          </p>
+        )}
+        {messages.map((msg) => (
+          <div key={msg.id} className="text-lg">
+            <span className="font-semibold text-zinc-300">{msg.username}</span>
+            <span className="text-zinc-100 ml-2">{msg.content}</span>
+          </div>
+        ))}
+        <div ref={bottomRef} />
+      </div>
+    </div>
+  );
+}
+
 export function LiveViewerClient({ auction, guest }: LiveViewerClientProps) {
   const [streamStatus, setStreamStatus] = useState<StreamStatus>("connecting");
   const [muted, setMuted] = useState(true);
   const [viewerCount, setViewerCount] = useState(0);
   const [auctionStatus, setAuctionStatus] = useState<AuctionStatus>(auction.status as AuctionStatus);
   const [currentLot, setCurrentLot] = useState<CurrentLotData | null>(null);
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const pcRef = useRef<RTCPeerConnection | null>(null);
@@ -134,9 +182,12 @@ export function LiveViewerClient({ auction, guest }: LiveViewerClientProps) {
         break;
       }
       case "chat_history":
+        setChatMessages(msg.messages);
+        break;
       case "chat_message":
+        setChatMessages((prev) => [...prev, msg]);
+        break;
       case "pong":
-        // Handled by future chat implementation
         break;
     }
   }, []);
@@ -413,8 +464,8 @@ export function LiveViewerClient({ auction, guest }: LiveViewerClientProps) {
         </div>
       </div>
 
-      {/* Chat section: placeholder for chat panel (30% on desktop) */}
-      <div className="shrink-0 h-[40dvh] md:h-auto md:flex-1 bg-zinc-950" />
+      {/* Chat section: independently scrollable (40dvh mobile, 30% desktop) */}
+      <ChatPanel messages={chatMessages} />
     </div>
   );
 }
