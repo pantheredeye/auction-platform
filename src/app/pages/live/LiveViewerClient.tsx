@@ -88,7 +88,17 @@ function formatTime(iso: string): string {
   }
 }
 
-function ChatPanel({ messages }: { messages: ChatMessage[] }) {
+function ChatPanel({
+  messages,
+  guest,
+  onSend,
+  onNamePrompt,
+}: {
+  messages: ChatMessage[];
+  guest: GuestInfo | null;
+  onSend: (content: string) => void;
+  onNamePrompt: () => void;
+}) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const autoScrollRef = useRef(true);
@@ -159,6 +169,63 @@ function ChatPanel({ messages }: { messages: ChatMessage[] }) {
           New messages
         </button>
       )}
+
+      <ChatInput guest={guest} onSend={onSend} onNamePrompt={onNamePrompt} />
+    </div>
+  );
+}
+
+// ─── Chat Input ──────────────────────────────────────────────────────
+
+function ChatInput({
+  guest,
+  onSend,
+  onNamePrompt,
+}: {
+  guest: GuestInfo | null;
+  onSend: (content: string) => void;
+  onNamePrompt: () => void;
+}) {
+  const [value, setValue] = useState("");
+  const hasName = Boolean(guest?.name);
+
+  const handleSubmit = () => {
+    const trimmed = value.trim();
+    if (!trimmed || !hasName) return;
+    onSend(trimmed);
+    setValue("");
+  };
+
+  if (!hasName) {
+    return (
+      <div className="shrink-0 border-t border-zinc-700 p-2">
+        <button
+          type="button"
+          onClick={onNamePrompt}
+          className="w-full h-12 px-4 rounded-lg border border-zinc-600 bg-zinc-900 text-lg text-zinc-500 text-left cursor-pointer hover:border-zinc-500 transition-colors"
+        >
+          Enter your name to chat
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="shrink-0 border-t border-zinc-700 p-2">
+      <input
+        type="text"
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && !e.shiftKey) {
+            e.preventDefault();
+            handleSubmit();
+          }
+        }}
+        placeholder="Type a message…"
+        maxLength={500}
+        className="w-full h-12 px-4 rounded-lg border border-zinc-600 bg-zinc-900 text-lg text-white placeholder:text-zinc-500 focus:outline-none focus:ring-2 focus:ring-zinc-400"
+      />
     </div>
   );
 }
@@ -176,6 +243,7 @@ export function LiveViewerClient({ auction, guest }: LiveViewerClientProps) {
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reconnectAttempt = useRef(0);
   const mountedRef = useRef(true);
+  const wsRef = useRef<WebSocket | null>(null);
 
   // Track whether WHEP stream is actually connected
   const whepConnectedRef = useRef(false);
@@ -331,8 +399,19 @@ export function LiveViewerClient({ auction, guest }: LiveViewerClientProps) {
 
   // ─── WebSocket lifecycle ──────────────────────────────────────────
 
+  const sendChatMessage = useCallback((content: string) => {
+    const ws = wsRef.current;
+    if (ws?.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: "chat", content }));
+    }
+  }, []);
+
+  // Stub: will be wired to guest name prompt card by a separate epic
+  const handleNamePrompt = useCallback(() => {
+    // TODO: show guest name prompt inline card
+  }, []);
+
   useEffect(() => {
-    const wsRef = { current: null as WebSocket | null };
     let wsReconnectTimer: ReturnType<typeof setTimeout> | null = null;
     let wsReconnectAttempt = 0;
     let alive = true;
@@ -387,6 +466,7 @@ export function LiveViewerClient({ auction, guest }: LiveViewerClientProps) {
       clearInterval(pingInterval);
       if (wsReconnectTimer) clearTimeout(wsReconnectTimer);
       wsRef.current?.close();
+      wsRef.current = null;
     };
   }, [auction.id, handleServerMessage]);
 
@@ -503,7 +583,12 @@ export function LiveViewerClient({ auction, guest }: LiveViewerClientProps) {
       </div>
 
       {/* Chat section: independently scrollable (40dvh mobile, 30% desktop) */}
-      <ChatPanel messages={chatMessages} />
+      <ChatPanel
+        messages={chatMessages}
+        guest={guest}
+        onSend={sendChatMessage}
+        onNamePrompt={handleNamePrompt}
+      />
     </div>
   );
 }
