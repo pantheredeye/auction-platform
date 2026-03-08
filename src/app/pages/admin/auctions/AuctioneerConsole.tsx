@@ -1204,6 +1204,19 @@ function StreamPanel({
   const { label, color } = STREAM_STATUS_LABELS[streamStatus];
   const showVideo = streamStatus !== "idle";
 
+  if (streamStatus === "idle") {
+    return (
+      <div className="flex items-center justify-center py-12">
+        <button
+          onClick={onStartCamera}
+          className="w-full max-w-md bg-red-600 hover:bg-red-700 active:bg-red-800 text-white text-xl font-bold h-16 rounded-xl transition-colors cursor-pointer"
+        >
+          GO LIVE
+        </button>
+      </div>
+    );
+  }
+
   return (
     <Card className="py-3">
       <CardContent className="space-y-3">
@@ -1213,11 +1226,6 @@ function StreamPanel({
             <span className="text-sm font-medium">{label}</span>
           </div>
           <div className="flex items-center gap-2">
-            {streamStatus === "idle" && (
-              <Button size="sm" variant="secondary" onClick={onStartCamera}>
-                Start Camera
-              </Button>
-            )}
             {streamStatus === "previewing" && (
               <>
                 <Button size="sm" onClick={onStartStream}>
