@@ -406,6 +406,42 @@ const app = defineApp([
     }
   },
 
+  // POST /api/recordings/:auctionId/status — update recording status (used by sendBeacon on tab close)
+  async ({ request, ctx }) => {
+    const url = new URL(request.url);
+    const statusMatch = url.pathname.match(/^\/api\/recordings\/([^/]+)\/status$/);
+    if (!statusMatch || request.method !== "POST") return;
+
+    if (!ctx.user) {
+      return Response.json({ error: "Unauthorized" }, { status: 401 });
+    }
+    const employeeRoles = ["super_admin", "admin", "auctioneer", "catalog_manager", "customer_service", "shipping"];
+    if (!employeeRoles.includes(ctx.currentOrganization?.role ?? "")) {
+      return Response.json({ error: "Forbidden" }, { status: 403 });
+    }
+
+    const auctionId = statusMatch[1];
+    const body = await request.json() as { status?: string };
+    const validStatuses = ["recording", "uploading", "ready", "failed"];
+    if (!body.status || !validStatuses.includes(body.status)) {
+      return Response.json({ error: "Invalid status" }, { status: 400 });
+    }
+
+    try {
+      const orgId = ctx.currentOrganization!.id;
+      await db
+        .updateTable("auctions")
+        .set({ recording_status: body.status, updatedAt: new Date().toISOString() })
+        .where("id", "=", auctionId)
+        .where("organizationId", "=", orgId)
+        .execute();
+      return Response.json({ ok: true });
+    } catch (err) {
+      console.error("Recording status update failed:", err);
+      return Response.json({ error: "Update failed" }, { status: 500 });
+    }
+  },
+
   render(Document, [
     route("/", [redirectIfAuth, Landing]),
     ...prefix("/auth", layout(PublicLayout, authRoutes)),

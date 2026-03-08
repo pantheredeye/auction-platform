@@ -2,6 +2,7 @@
  * MediaRecorder wrapper for recording live auction streams.
  * Handles codec negotiation (WebM preferred, MP4/AVC1 fallback for Safari).
  * Uploads chunks to R2 via POST endpoint as they are recorded.
+ * On tab close, uses sendBeacon to fire-and-forget remaining data.
  */
 
 export interface RecordingHandle {
@@ -83,7 +84,47 @@ export function startRecording(
 
   recorder.start(TIMESLICE_MS);
 
+  // beforeunload: beacon remaining data as fire-and-forget partial save
+  const handleBeforeUnload = () => {
+    if (recorder.state === "inactive") return;
+
+    // Swap ondataavailable to use sendBeacon instead of fetch
+    recorder.ondataavailable = (e) => {
+      if (e.data.size > 0) {
+        const idx = chunkIndex++;
+        const url = `/api/recordings/${encodeURIComponent(auctionId)}/chunk?chunkIndex=${idx}`;
+        navigator.sendBeacon(url, e.data);
+      }
+    };
+
+    // requestData() triggers ondataavailable synchronously with buffered data
+    try {
+      recorder.requestData();
+    } catch {
+      // May throw if recorder is in unexpected state
+    }
+
+    try {
+      recorder.stop();
+    } catch {
+      // May already be stopped
+    }
+
+    // Mark recording as uploading (incomplete/partial)
+    navigator.sendBeacon(
+      `/api/recordings/${encodeURIComponent(auctionId)}/status`,
+      new Blob([JSON.stringify({ status: "uploading" })], {
+        type: "application/json",
+      }),
+    );
+  };
+
+  window.addEventListener("beforeunload", handleBeforeUnload);
+
   const stop = (): Promise<void> => {
+    // Clean up beforeunload handler on normal stop
+    window.removeEventListener("beforeunload", handleBeforeUnload);
+
     return new Promise<void>((resolve) => {
       if (recorder.state === "inactive") {
         resolve();
