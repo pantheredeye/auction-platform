@@ -32,6 +32,39 @@ import { transitionAuctionStatus } from "./server-functions/auctions";
 import { Volume2, VolumeX, ChevronDown, ChevronUp, MessageSquare, List, Share2, Loader2 } from "lucide-react";
 import { startRecording, type RecordingHandle } from "@/lib/stream/recording";
 
+// ─── useAudioLevel hook ──────────────────────────────────────────
+
+function useAudioLevel(stream: MediaStream | null): number {
+  const [level, setLevel] = useState(0);
+  useEffect(() => {
+    if (!stream) { setLevel(0); return; }
+    const audioTracks = stream.getAudioTracks();
+    if (audioTracks.length === 0) { setLevel(0); return; }
+    let ctx: AudioContext;
+    try { ctx = new AudioContext(); } catch { return; }
+    const source = ctx.createMediaStreamSource(stream);
+    const analyser = ctx.createAnalyser();
+    analyser.fftSize = 256;
+    source.connect(analyser);
+    const data = new Uint8Array(analyser.frequencyBinCount);
+    let rafId: number;
+    function tick() {
+      analyser.getByteFrequencyData(data);
+      let sum = 0;
+      for (let i = 0; i < data.length; i++) sum += data[i] * data[i];
+      setLevel(Math.sqrt(sum / data.length) / 255);
+      rafId = requestAnimationFrame(tick);
+    }
+    rafId = requestAnimationFrame(tick);
+    return () => {
+      cancelAnimationFrame(rafId);
+      source.disconnect();
+      ctx.close().catch(() => {});
+    };
+  }, [stream]);
+  return level;
+}
+
 // ─── Audio cue via Web Audio API ─────────────────────────────────
 
 let audioCtx: AudioContext | null = null;
@@ -147,7 +180,15 @@ export function AuctioneerConsole({ auction, initialLots }: AuctioneerConsolePro
   // Stream state
   const [streamStatus, setStreamStatus] = useState<StreamStatus>("idle");
   const [cameraError, setCameraError] = useState<string | null>(null);
-  const videoRef = useRef<HTMLVideoElement>(null);
+  const [activeStream, setActiveStream] = useState<MediaStream | null>(null);
+  const videoElRef = useRef<HTMLVideoElement>(null);
+  // Callback ref: whenever a <video> mounts/swaps, sync srcObject from mediaStreamRef
+  const videoRef = useCallback((el: HTMLVideoElement | null) => {
+    videoElRef.current = el;
+    if (el && mediaStreamRef.current) {
+      el.srcObject = mediaStreamRef.current;
+    }
+  }, []);
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const recordingRef = useRef<RecordingHandle | null>(null);
@@ -212,8 +253,9 @@ export function AuctioneerConsole({ auction, initialLots }: AuctioneerConsolePro
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
       mediaStreamRef.current = stream;
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
+      setActiveStream(stream);
+      if (videoElRef.current) {
+        videoElRef.current.srcObject = stream;
       }
       setStreamStatus("previewing");
     } catch (err: any) {
@@ -240,9 +282,10 @@ export function AuctioneerConsole({ auction, initialLots }: AuctioneerConsolePro
         track.stop();
       }
       mediaStreamRef.current = null;
+      setActiveStream(null);
     }
-    if (videoRef.current) {
-      videoRef.current.srcObject = null;
+    if (videoElRef.current) {
+      videoElRef.current.srcObject = null;
     }
     setStreamStatus("idle");
   }, []);
@@ -278,6 +321,10 @@ export function AuctioneerConsole({ auction, initialLots }: AuctioneerConsolePro
 
   const startStream = useCallback(async () => {
     if (!mediaStreamRef.current) return;
+    if (auctionStatus === "closed" || auctionStatus === "settled" || auctionStatus === "archived") {
+      toast.error("Auction already ended — cannot go live again");
+      return;
+    }
     setStreamStatus("connecting");
 
     try {
@@ -307,8 +354,10 @@ export function AuctioneerConsole({ auction, initialLots }: AuctioneerConsolePro
       // Start recording reusing same getUserMedia stream
       startRecordingForStream();
 
-      // Transition auction status to live
-      handleAuctionTransition("live");
+      // Transition auction status to live (skip if already live, e.g. from quickGoLive)
+      if (auctionStatus !== "live") {
+        handleAuctionTransition("live");
+      }
 
       pc.onconnectionstatechange = () => {
         if (pc.connectionState === "connected") {
@@ -338,7 +387,7 @@ export function AuctioneerConsole({ auction, initialLots }: AuctioneerConsolePro
       }
       setStreamStatus("previewing");
     }
-  }, [auction.id, startRecordingForStream, handleAuctionTransition]);
+  }, [auction.id, auctionStatus, startRecordingForStream, handleAuctionTransition]);
 
   const stopStream = useCallback(async () => {
     setIsSaving(true);
@@ -361,6 +410,14 @@ export function AuctioneerConsole({ auction, initialLots }: AuctioneerConsolePro
       const result = await stopRecordingForStream();
       setRecordingResult(result);
 
+      // 4. Release camera/mic tracks (turns off LED)
+      if (mediaStreamRef.current) {
+        for (const track of mediaStreamRef.current.getTracks()) track.stop();
+        mediaStreamRef.current = null;
+        setActiveStream(null);
+      }
+      if (videoElRef.current) videoElRef.current.srcObject = null;
+
       if (result.success) {
         toast.success("Stream ended. Recording saved.");
       } else {
@@ -376,11 +433,6 @@ export function AuctioneerConsole({ auction, initialLots }: AuctioneerConsolePro
       setStreamStatus("ended");
     }
   }, [auction.id, stopRecordingForStream]);
-
-  // Auto-start camera preview on mount
-  useEffect(() => {
-    startCamera();
-  }, [startCamera]);
 
   // Cleanup camera/stream/recorder on unmount
   useEffect(() => {
@@ -585,6 +637,10 @@ export function AuctioneerConsole({ auction, initialLots }: AuctioneerConsolePro
   const isLotActive = currentLotState && (currentLotState.status === "active" || currentLotState.status === "going_once" || currentLotState.status === "going_twice");
   const hasPendingLots = allLots.some((l) => lots.get(l.id)?.status === "pending");
 
+  const audioLevel = useAudioLevel(activeStream);
+  const hasAudioTrack = (activeStream?.getAudioTracks().length ?? 0) > 0;
+  const isStreamingLive = isLive && (streamStatus === "live" || streamStatus === "connecting");
+
   // Pre-fill floor bid: current bid + default increment
   const nextBidCents = currentLotState?.currentBidCents != null
     ? currentLotState.currentBidCents + auction.defaultIncrementCents
@@ -689,10 +745,10 @@ export function AuctioneerConsole({ auction, initialLots }: AuctioneerConsolePro
         </div>
       </header>
 
-      {/* Main grid — responsive. When live: 2-col (no lot sidebar), otherwise 3-col */}
-      <div className={`flex-1 grid gap-0 overflow-hidden ${isLive ? "grid-cols-1 md:grid-cols-[1fr_240px]" : "grid-cols-1 md:grid-cols-[1fr_240px] lg:grid-cols-[240px_1fr_240px]"}`}>
-        {/* Left: Lot queue — visible lg+ when not live, hidden when live (collapsed into main area) */}
-        {!isLive && (
+      {/* Main grid — responsive. When streaming live: 2-col (no lot sidebar), otherwise 3-col */}
+      <div className={`flex-1 grid gap-0 overflow-hidden ${isStreamingLive ? "grid-cols-1 md:grid-cols-[1fr_240px]" : "grid-cols-1 md:grid-cols-[1fr_240px] lg:grid-cols-[240px_1fr_240px]"}`}>
+        {/* Left: Lot queue — visible lg+ when not streaming, hidden when streaming (collapsed into main area) */}
+        {!isStreamingLive && (
           <aside className="hidden lg:block border-r overflow-y-auto p-3 space-y-1">
             <h2 className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">Lots</h2>
             {lotQueue}
@@ -701,8 +757,8 @@ export function AuctioneerConsole({ auction, initialLots }: AuctioneerConsolePro
 
         {/* Center: Stream + current lot + bid feed */}
         <main className="overflow-y-auto p-4 flex flex-col gap-4">
-          {/* Collapsible lots on small/medium screens (hidden when live — lots collapse below) */}
-          {!isLive && (
+          {/* Collapsible lots on small/medium screens (hidden when streaming — lots collapse below) */}
+          {!isStreamingLive && (
             <div className="lg:hidden">
               <button
                 onClick={() => setLotsOpen(!lotsOpen)}
@@ -726,14 +782,14 @@ export function AuctioneerConsole({ auction, initialLots }: AuctioneerConsolePro
               slug={auction.slug}
               durationSecs={streamDurationSecs}
               recordingResult={recordingResult}
-              onRetry={async () => {
-                // Re-attempt by resetting to previewing so auctioneer can start fresh
+              canRestart={auctionStatus !== "closed" && auctionStatus !== "settled" && auctionStatus !== "archived"}
+              onRestart={async () => {
                 setRecordingResult(null);
-                setStreamStatus("idle");
-                startCamera();
+                setStreamDurationSecs(0);
+                await startCamera();
               }}
             />
-          ) : isLive ? (
+          ) : isStreamingLive ? (
             <>
               {/* Expanded video when live — no card wrapper, fills main area */}
               <div className="relative flex-shrink-0">
@@ -871,6 +927,13 @@ export function AuctioneerConsole({ auction, initialLots }: AuctioneerConsolePro
                 onStopCamera={stopCamera}
                 onStartStream={startStream}
                 onStopStream={stopStream}
+                lotCount={allLots.length}
+                hasAudioTrack={hasAudioTrack}
+                audioLevel={audioLevel}
+                activeStream={activeStream}
+                connectionStatus={connectionStatus}
+                viewerCount={viewerCount}
+                auctionTitle={auction.title}
               />
 
               {currentLotData && currentLotState ? (
@@ -1503,13 +1566,15 @@ function PostStreamSummary({
   slug,
   durationSecs,
   recordingResult,
-  onRetry,
+  canRestart,
+  onRestart,
 }: {
   title: string;
   slug: string;
   durationSecs: number;
   recordingResult: RecordingResult | null;
-  onRetry: () => void;
+  canRestart: boolean;
+  onRestart: () => void;
 }) {
   const auctionUrl = typeof window !== "undefined" ? `${window.location.origin}/live/${slug}` : `/live/${slug}`;
   const [copied, setCopied] = useState(false);
@@ -1542,25 +1607,25 @@ function PostStreamSummary({
         {recordingResult && (
           <div className={`rounded-lg border p-3 ${failed ? "border-red-500/30 bg-red-500/5" : "border-green-500/30 bg-green-500/5"}`}>
             {failed ? (
-              <div className="flex items-center justify-between gap-2">
-                <p className="text-sm text-red-600 dark:text-red-400 font-medium">
-                  {recordingResult.failedCount === -1
-                    ? "Recording failed"
-                    : `Recording saved with ${recordingResult.failedCount} failed chunk(s)`}
-                </p>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="min-h-[48px] px-4 border-red-500/30 text-red-600 dark:text-red-400 hover:bg-red-500/10"
-                  onClick={onRetry}
-                >
-                  Retry
-                </Button>
-              </div>
+              <p className="text-sm text-red-600 dark:text-red-400 font-medium">
+                {recordingResult.failedCount === -1
+                  ? "Recording failed"
+                  : `Recording saved with ${recordingResult.failedCount} failed chunk(s)`}
+              </p>
             ) : (
               <p className="text-sm text-green-600 dark:text-green-400 font-medium">Recording saved</p>
             )}
           </div>
+        )}
+
+        {/* Restart stream */}
+        {canRestart && (
+          <Button
+            className="w-full min-h-[48px] text-lg font-bold bg-red-600 hover:bg-red-700 text-white"
+            onClick={onRestart}
+          >
+            Go Live Again
+          </Button>
         )}
 
         {/* Copy auction link */}
@@ -1595,26 +1660,60 @@ function StreamPanel({
   onStopCamera,
   onStartStream,
   onStopStream,
+  lotCount,
+  hasAudioTrack,
+  audioLevel,
+  activeStream,
+  connectionStatus,
+  viewerCount,
+  auctionTitle,
 }: {
   streamStatus: StreamStatus;
   cameraError: string | null;
-  videoRef: React.RefObject<HTMLVideoElement | null>;
+  videoRef: React.RefCallback<HTMLVideoElement> | React.RefObject<HTMLVideoElement | null>;
   isRecording: boolean;
   onStartCamera: () => void;
   onStopCamera: () => void;
   onStartStream: () => void;
   onStopStream: () => void;
+  lotCount: number;
+  hasAudioTrack: boolean;
+  audioLevel: number;
+  activeStream: MediaStream | null;
+  connectionStatus: ConnectionStatus;
+  viewerCount: number;
+  auctionTitle: string;
 }) {
+  const [goLiveOpen, setGoLiveOpen] = useState(false);
   const { label, color } = STREAM_STATUS_LABELS[streamStatus];
   const showVideo = streamStatus === "previewing" || streamStatus === "connecting" || streamStatus === "live";
 
-  // Idle state: camera is starting up automatically
+  const isWsConnected = connectionStatus === "connected";
+  const canGoLive = hasAudioTrack && isWsConnected;
+
+  // Get device info from active stream
+  const videoTrack = activeStream?.getVideoTracks()[0] ?? null;
+  const audioTrack = activeStream?.getAudioTracks()[0] ?? null;
+  const videoSettings = videoTrack?.getSettings();
+  const resolution = videoSettings ? `${videoSettings.width}×${videoSettings.height}` : null;
+  const micLabel = audioTrack?.label || null;
+
+  // Idle state: camera not active
   if (streamStatus === "idle") {
     return (
       <Card className="py-3">
-        <CardContent className="space-y-3">
-          <div className="flex items-center justify-center aspect-video bg-black rounded-lg">
-            <p className="text-zinc-400 text-lg">Starting camera...</p>
+        <CardContent className="space-y-4">
+          <div className="flex flex-col items-center justify-center aspect-video bg-black rounded-lg gap-4 p-6">
+            <h2 className="text-white text-xl font-semibold text-center">{auctionTitle}</h2>
+            <p className="text-zinc-400 text-sm text-center">Start your camera to preview before going live</p>
+            <div className="flex items-center gap-3 text-sm text-zinc-400">
+              <span>{lotCount} lot{lotCount !== 1 ? "s" : ""}</span>
+              <span className="text-zinc-600">|</span>
+              <ConnectionBadge status={connectionStatus} />
+            </div>
+            <Button size="lg" onClick={onStartCamera} className="h-14 min-h-[48px] text-lg px-8 mt-2">
+              Start Camera
+            </Button>
           </div>
           <video ref={videoRef} autoPlay muted playsInline className="hidden" />
         </CardContent>
@@ -1631,7 +1730,7 @@ function StreamPanel({
             <p className="text-red-400 text-lg font-medium">
               {cameraError ?? "Camera error"}
             </p>
-            <Button size="lg" variant="secondary" onClick={onStartCamera} className="h-12 text-lg">
+            <Button size="lg" variant="secondary" onClick={onStartCamera} className="h-12 min-h-[48px] text-lg">
               Retry Camera
             </Button>
           </div>
@@ -1681,15 +1780,107 @@ function StreamPanel({
           className={`w-full rounded-lg bg-black ${showVideo ? "aspect-video" : "hidden"}`}
         />
         {streamStatus === "previewing" && (
-          <button
-            onClick={onStartStream}
-            className="w-full bg-red-600 hover:bg-red-700 active:bg-red-800 text-white text-xl font-bold h-16 rounded-xl transition-colors cursor-pointer"
-          >
-            GO LIVE
-          </button>
+          <>
+            {/* Enhanced pre-stream checklist */}
+            <div className="space-y-2 px-1">
+              {/* Camera */}
+              <div className="flex items-center gap-2 text-sm">
+                <span className="text-green-600 font-medium">✓ Camera</span>
+                {resolution && <span className="text-xs text-muted-foreground">{resolution}</span>}
+              </div>
+              {/* Mic + audio level */}
+              <div className="flex items-center gap-2 text-sm">
+                <span className={hasAudioTrack ? "text-green-600 font-medium" : "text-red-500 font-medium"}>
+                  {hasAudioTrack ? "✓" : "✗"} Mic
+                </span>
+                {micLabel && <span className="text-xs text-muted-foreground truncate max-w-[200px]">{micLabel}</span>}
+              </div>
+              {hasAudioTrack && (
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-muted-foreground w-10 shrink-0">Level</span>
+                  <div className="flex-1 h-2 rounded-full bg-muted overflow-hidden">
+                    <div
+                      className="h-full rounded-full transition-[width] duration-75"
+                      style={{
+                        width: `${Math.min(audioLevel * 100, 100)}%`,
+                        backgroundColor: audioLevel > 0.7 ? "#eab308" : "#22c55e",
+                      }}
+                    />
+                  </div>
+                </div>
+              )}
+              {/* Lots */}
+              <div className="flex items-center gap-2 text-sm">
+                <span className={lotCount === 0 ? "text-amber-500 font-medium" : "text-muted-foreground"}>
+                  {lotCount} lot{lotCount !== 1 ? "s" : ""}
+                </span>
+                {lotCount === 0 && <span className="text-xs text-amber-500">Add lots before going live</span>}
+              </div>
+              {/* Connection */}
+              <div className="flex items-center gap-2 text-sm">
+                <ConnectionBadge status={connectionStatus} />
+              </div>
+            </div>
+
+            {/* GO LIVE button — disabled when mic missing or WS disconnected */}
+            <AlertDialog open={goLiveOpen} onOpenChange={setGoLiveOpen}>
+              <AlertDialogTrigger asChild>
+                <button
+                  disabled={!canGoLive}
+                  className={`w-full text-white text-xl font-bold h-16 min-h-[48px] rounded-xl transition-colors cursor-pointer ${
+                    canGoLive
+                      ? "bg-red-600 hover:bg-red-700 active:bg-red-800"
+                      : "bg-red-600/40 cursor-not-allowed"
+                  }`}
+                >
+                  GO LIVE
+                </button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Go live?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    You're about to go live with {lotCount} lot{lotCount !== 1 ? "s" : ""}. Viewers will see your stream immediately.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel className="h-12 min-h-[48px]">Cancel</AlertDialogCancel>
+                  <AlertDialogAction
+                    className="h-12 min-h-[48px] bg-red-600 hover:bg-red-700 text-white"
+                    onClick={() => { setGoLiveOpen(false); onStartStream(); }}
+                  >
+                    Go Live
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+            {!canGoLive && (
+              <p className="text-xs text-center text-muted-foreground">
+                {!hasAudioTrack ? "Mic not detected" : "Not connected to server"}
+              </p>
+            )}
+          </>
         )}
       </CardContent>
     </Card>
+  );
+}
+
+function ConnectionBadge({ status }: { status: ConnectionStatus }) {
+  const dot =
+    status === "connected" ? "bg-green-500"
+    : status === "reconnecting" || status === "connecting" ? "bg-yellow-500 animate-pulse"
+    : "bg-red-500";
+  const text =
+    status === "connected" ? "Connected"
+    : status === "reconnecting" ? "Reconnecting"
+    : status === "connecting" ? "Connecting"
+    : "Disconnected";
+  return (
+    <span className="flex items-center gap-1.5 text-sm text-muted-foreground">
+      <span className={`inline-block h-2 w-2 rounded-full ${dot}`} />
+      {text}
+    </span>
   );
 }
 
