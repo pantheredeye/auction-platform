@@ -19,7 +19,8 @@ export async function processBidEvent(
     .executeTakeFirst();
 
   if (!lot) {
-    throw new Error(`Lot not found: ${event.lotId}`);
+    console.error(`[bid-events] Lot not found: ${event.lotId}, acking to prevent infinite retries`);
+    return;
   }
 
   // Insert bid event (INSERT OR IGNORE for idempotency via unique idempotencyKey)

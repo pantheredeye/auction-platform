@@ -35,8 +35,14 @@ Object.assign(src, {
   queues: {
     producers: [
       { binding: "IMPORT_QUEUE", queue: "auction-import-queue-staging" },
+      { binding: "BID_EVENTS_QUEUE", queue: "auction-bid-events-staging" },
+      { binding: "CHAT_EVENTS_QUEUE", queue: "auction-chat-events-staging" },
     ],
-    consumers: [{ queue: "auction-import-queue-staging" }],
+    consumers: [
+      { queue: "auction-import-queue-staging" },
+      { queue: "auction-bid-events-staging", max_batch_size: 50, max_batch_timeout: 5, max_retries: 5 },
+      { queue: "auction-chat-events-staging", max_batch_size: 50, max_batch_timeout: 5, max_retries: 5 },
+    ],
   },
   routes: [
     { pattern: "staging-auction.digitalglue.dev", custom_domain: true },
@@ -44,6 +50,8 @@ Object.assign(src, {
   vars: {
     WEBAUTHN_APP_NAME: "auction-platform",
     WEBAUTHN_RP_ID: "staging-auction.digitalglue.dev",
+    CALLS_APP_ID: "0b55ac866d840480c10cf74a36915901",
+    CALLS_API: "https://rtc.live.cloudflare.com",
   },
 });
 

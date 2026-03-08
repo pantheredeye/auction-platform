@@ -19,7 +19,8 @@ export async function processChatEvent(
     .executeTakeFirst();
 
   if (!auction) {
-    throw new Error(`Auction not found: ${event.auctionId}`);
+    console.error(`[chat-events] Auction not found: ${event.auctionId}, acking to prevent infinite retries`);
+    return;
   }
 
   // Insert chat message (INSERT OR IGNORE for idempotency via unique id)

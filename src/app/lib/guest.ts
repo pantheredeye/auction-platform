@@ -39,6 +39,7 @@ export function getOrCreateGuestId(request: Request): GuestInfo {
     "Path=/",
     "HttpOnly",
     "SameSite=Lax",
+    "Secure",
   ].join("; ");
 
   return { guestId, guestName, setCookieHeader };

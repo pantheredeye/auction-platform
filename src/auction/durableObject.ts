@@ -301,11 +301,11 @@ export class AuctionRoomDO extends DurableObject<Cloudflare.Env> {
     const { type } = parsed;
 
     if (type === "bid") {
-      this.handleBid(ws, parsed as unknown as ClientMessage & { type: "bid" });
+      await this.handleBid(ws, parsed as unknown as ClientMessage & { type: "bid" });
     } else if (type === "claim") {
-      this.handleClaim(ws, parsed as unknown as ClientMessage & { type: "claim" });
+      await this.handleClaim(ws, parsed as unknown as ClientMessage & { type: "claim" });
     } else if (type === "chat") {
-      this.handleChat(ws, parsed as unknown as ClientMessage & { type: "chat" });
+      await this.handleChat(ws, parsed as unknown as ClientMessage & { type: "chat" });
     } else if (ADMIN_MESSAGE_TYPES.has(type as string)) {
       await this.handleAdminMessage(ws, parsed as unknown as AdminMessage);
     }
@@ -313,7 +313,7 @@ export class AuctionRoomDO extends DurableObject<Cloudflare.Env> {
 
   // ─── Bid handling ─────────────────────────────────────────────
 
-  private handleBid(
+  private async handleBid(
     ws: WebSocket,
     msg: { type: "bid"; lotId: string; amountCents: number; idempotencyKey: string },
   ) {
@@ -394,8 +394,12 @@ export class AuctionRoomDO extends DurableObject<Cloudflare.Env> {
     lot.bidCount++;
     lot.sequence++;
 
-    // Track idempotency
+    // Track idempotency (bounded: clear oldest half at 5000)
     this.idempotencyKeys.add(idempotencyKey);
+    if (this.idempotencyKeys.size > 5000) {
+      const keys = [...this.idempotencyKeys];
+      this.idempotencyKeys = new Set(keys.slice(keys.length / 2));
+    }
 
     // Buffer bid event for queue
     this.bidBuffer.push({
@@ -415,11 +419,11 @@ export class AuctionRoomDO extends DurableObject<Cloudflare.Env> {
 
     // Flush buffer if it reaches 10 events
     if (this.bidBuffer.length >= 10) {
-      this.flushBidBuffer();
+      await this.flushBidBuffer();
     }
 
     // Persist updated state
-    this.persistState();
+    await this.persistState();
 
     // Send bid_accepted to bidder only
     this.sendToSocket(ws, {
@@ -444,7 +448,7 @@ export class AuctionRoomDO extends DurableObject<Cloudflare.Env> {
 
   // ─── Claim handling (live_sell / dutch) ─────────────────────────
 
-  private handleClaim(
+  private async handleClaim(
     ws: WebSocket,
     msg: { type: "claim"; lotId: string; quantity: number; idempotencyKey: string },
   ) {
@@ -531,17 +535,17 @@ export class AuctionRoomDO extends DurableObject<Cloudflare.Env> {
     });
 
     if (this.bidBuffer.length >= 10) {
-      this.flushBidBuffer();
+      await this.flushBidBuffer();
     }
 
     // Auto-sell if fully claimed
     if (lot.quantityClaimed >= lot.quantity) {
       lot.status = "sold";
       lot.sequence++;
-      this.flushBidBuffer();
+      await this.flushBidBuffer();
     }
 
-    this.persistState();
+    await this.persistState();
 
     // Confirm to claimer
     this.sendToSocket(ws, {
@@ -559,7 +563,7 @@ export class AuctionRoomDO extends DurableObject<Cloudflare.Env> {
 
   // ─── Chat handling ──────────────────────────────────────────────
 
-  private handleChat(ws: WebSocket, msg: { type: "chat"; content: string }) {
+  private async handleChat(ws: WebSocket, msg: { type: "chat"; content: string }) {
     const attachment = ws.deserializeAttachment() as SocketAttachment | null;
     if (!attachment) {
       this.sendToSocket(ws, { type: "error", message: "No attachment" });
@@ -568,6 +572,13 @@ export class AuctionRoomDO extends DurableObject<Cloudflare.Env> {
 
     const { userId, username } = attachment;
     const now = Date.now();
+
+    // Periodic cleanup of stale rate-limit entries (> 10s old)
+    if (this.chatRateLimits.size > 100) {
+      for (const [uid, ts] of this.chatRateLimits) {
+        if (now - ts > 10_000) this.chatRateLimits.delete(uid);
+      }
+    }
 
     // Rate limit: 1 chat per 2 seconds per user
     const lastChat = this.chatRateLimits.get(userId);
@@ -605,11 +616,11 @@ export class AuctionRoomDO extends DurableObject<Cloudflare.Env> {
 
     this.chatBuffer.push(chatEvent);
     if (this.chatBuffer.length >= 10) {
-      this.flushChatBuffer();
+      await this.flushChatBuffer();
     }
 
     // Ensure a flush alarm is scheduled so buffer isn't lost on hibernation
-    this.scheduleChatFlushAlarm();
+    await this.scheduleChatFlushAlarm();
   }
 
   // ─── Admin message handling ──────────────────────────────────────
@@ -953,7 +964,7 @@ export class AuctionRoomDO extends DurableObject<Cloudflare.Env> {
     });
 
     if (this.bidBuffer.length >= 10) {
-      this.flushBidBuffer();
+      await this.flushBidBuffer();
     }
 
     await this.persistState();
@@ -1219,8 +1230,8 @@ export class AuctionRoomDO extends DurableObject<Cloudflare.Env> {
         this.bidBuffer.map((event) => ({ body: event })),
       );
       this.bidBuffer = [];
-    } catch {
-      // Keep events in buffer for retry on next flush
+    } catch (err) {
+      console.error(`[AuctionRoomDO:${this.state.auctionId}] flushBidBuffer failed (${this.bidBuffer.length} events):`, err);
     }
   }
 
@@ -1231,8 +1242,8 @@ export class AuctionRoomDO extends DurableObject<Cloudflare.Env> {
         this.chatBuffer.map((event) => ({ body: event })),
       );
       this.chatBuffer = [];
-    } catch {
-      // Keep events in buffer for retry on next flush
+    } catch (err) {
+      console.error(`[AuctionRoomDO:${this.state.auctionId}] flushChatBuffer failed (${this.chatBuffer.length} events):`, err);
     }
   }
 
@@ -1267,7 +1278,11 @@ export class AuctionRoomDO extends DurableObject<Cloudflare.Env> {
         lots: new Map(stored.lots),
         currentLotId: stored.currentLotId,
         viewerCount: this.ctx.getWebSockets().length,
-        connectedUsers: new Set(),
+        connectedUsers: new Set(
+          this.ctx.getWebSockets()
+            .map((ws) => (ws.deserializeAttachment() as SocketAttachment | null)?.userId)
+            .filter(Boolean) as string[],
+        ),
         defaultIncrementCents: stored.defaultIncrementCents,
         incrementRules: stored.incrementRules,
       };

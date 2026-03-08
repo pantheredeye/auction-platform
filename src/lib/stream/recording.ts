@@ -131,8 +131,9 @@ export function startRecording(
         return;
       }
       recorder.onstop = async () => {
-        // Wait for all uploads (including the final chunk) to complete
-        await Promise.all(pendingUploads);
+        // Wait for all uploads with 15s timeout to avoid hanging forever
+        const timeout = new Promise<void>((r) => setTimeout(r, 15_000));
+        await Promise.race([Promise.all(pendingUploads), timeout]);
         resolve();
       };
       // Triggers one last ondataavailable before onstop

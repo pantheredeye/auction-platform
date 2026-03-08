@@ -36,6 +36,9 @@ export function validateBidAmount(
   currentHighCents: number,
   incrementCents: number,
 ): { valid: boolean; minimumBid: number } {
+  if (bidCents <= 0) {
+    return { valid: false, minimumBid: currentHighCents + incrementCents };
+  }
   const minimumBid = currentHighCents + incrementCents;
   return {
     valid: bidCents >= minimumBid,

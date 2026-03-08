@@ -19,6 +19,7 @@ export async function setGuestName(name: string): Promise<boolean> {
     "Path=/",
     "HttpOnly",
     "SameSite=Lax",
+    "Secure",
   ].join("; ");
 
   response.headers.append("Set-Cookie", setCookieHeader);
