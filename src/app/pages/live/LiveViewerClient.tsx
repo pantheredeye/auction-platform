@@ -113,6 +113,14 @@ function ChatPanel({
   const [hasNewMessages, setHasNewMessages] = useState(false);
   const nameInputRef = useRef<HTMLInputElement | null>(null);
 
+  // Focus name input when prompt appears
+  useEffect(() => {
+    if (showNamePrompt) {
+      // RAF ensures the DOM has painted before focusing
+      requestAnimationFrame(() => nameInputRef.current?.focus());
+    }
+  }, [showNamePrompt]);
+
   // Detect manual scroll-up to pause auto-scroll
   const handleScroll = useCallback(() => {
     const el = scrollRef.current;
