@@ -529,6 +529,7 @@ export function AuctioneerConsole({ auction, initialLots }: AuctioneerConsolePro
   // ─── Collapsible panels for small screens ─────────────────────
   const [lotsOpen, setLotsOpen] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
+  const [liveControlsOpen, setLiveControlsOpen] = useState(false);
 
   // ─── Render ─────────────────────────────────────────────────────
 
@@ -624,84 +625,187 @@ export function AuctioneerConsole({ auction, initialLots }: AuctioneerConsolePro
         </div>
       </header>
 
-      {/* Main grid — responsive */}
-      <div className="flex-1 grid grid-cols-1 md:grid-cols-[1fr_240px] lg:grid-cols-[240px_1fr_240px] gap-0 overflow-hidden">
-        {/* Left: Lot queue — visible lg+, collapsible on smaller */}
-        <aside className="hidden lg:block border-r overflow-y-auto p-3 space-y-1">
-          <h2 className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">Lots</h2>
-          {lotQueue}
-        </aside>
+      {/* Main grid — responsive. When live: 2-col (no lot sidebar), otherwise 3-col */}
+      <div className={`flex-1 grid gap-0 overflow-hidden ${isLive ? "grid-cols-1 md:grid-cols-[1fr_240px]" : "grid-cols-1 md:grid-cols-[1fr_240px] lg:grid-cols-[240px_1fr_240px]"}`}>
+        {/* Left: Lot queue — visible lg+ when not live, hidden when live (collapsed into main area) */}
+        {!isLive && (
+          <aside className="hidden lg:block border-r overflow-y-auto p-3 space-y-1">
+            <h2 className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">Lots</h2>
+            {lotQueue}
+          </aside>
+        )}
 
         {/* Center: Stream + current lot + bid feed */}
         <main className="overflow-y-auto p-4 flex flex-col gap-4">
-          {/* Collapsible lots on small/medium screens */}
-          <div className="lg:hidden">
-            <button
-              onClick={() => setLotsOpen(!lotsOpen)}
-              className="flex items-center gap-2 w-full text-left text-sm font-medium text-muted-foreground hover:text-foreground py-1"
-            >
-              <List className="h-4 w-4" />
-              Lots ({allLots.length})
-              {lotsOpen ? <ChevronUp className="h-4 w-4 ml-auto" /> : <ChevronDown className="h-4 w-4 ml-auto" />}
-            </button>
-            {lotsOpen && (
-              <div className="border rounded-lg p-2 mt-1 max-h-48 overflow-y-auto space-y-1">
-                {lotQueue}
-              </div>
-            )}
-          </div>
-
-          <StreamPanel
-            streamStatus={streamStatus}
-            cameraError={cameraError}
-            videoRef={videoRef}
-            onStartCamera={startCamera}
-            onStopCamera={stopCamera}
-            onStartStream={startStream}
-            onStopStream={stopStream}
-          />
-
-          {currentLotData && currentLotState ? (
-            <CurrentLotCard lot={currentLotData} state={currentLotState} />
-          ) : (
-            <div className="flex items-center justify-center h-32 text-muted-foreground text-sm">
-              No active lot
+          {/* Collapsible lots on small/medium screens (hidden when live — lots collapse below) */}
+          {!isLive && (
+            <div className="lg:hidden">
+              <button
+                onClick={() => setLotsOpen(!lotsOpen)}
+                className="flex items-center gap-2 w-full text-left text-sm font-medium text-muted-foreground hover:text-foreground py-1"
+              >
+                <List className="h-4 w-4" />
+                Lots ({allLots.length})
+                {lotsOpen ? <ChevronUp className="h-4 w-4 ml-auto" /> : <ChevronDown className="h-4 w-4 ml-auto" />}
+              </button>
+              {lotsOpen && (
+                <div className="border rounded-lg p-2 mt-1 max-h-48 overflow-y-auto space-y-1">
+                  {lotQueue}
+                </div>
+              )}
             </div>
           )}
 
-          {currentLot && currentLotState && (
-            <AuctionControlsPanel
-              lotId={currentLot}
-              lotStatus={currentLotState.status}
-              saleMode={currentLotState.saleMode}
-              hasBids={currentLotState.bidCount > 0 && currentLotState.currentBidCents != null}
-              hasClaims={currentLotState.quantityClaimed > 0}
-              quantity={currentLotState.quantity}
-              quantityClaimed={currentLotState.quantityClaimed}
-              hasPendingLots={hasPendingLots}
-              isConnected={isConnected}
-              onSend={sendMessage}
-            />
+          {isLive ? (
+            <>
+              {/* Expanded video when live — no card wrapper, fills main area */}
+              <div className="relative flex-shrink-0">
+                <video
+                  ref={videoRef}
+                  autoPlay
+                  muted
+                  playsInline
+                  className="w-full rounded-lg bg-black aspect-video"
+                />
+                {/* Live indicator overlay */}
+                <div className="absolute top-3 left-3 flex items-center gap-1.5 bg-black/60 backdrop-blur-sm rounded-full px-2.5 py-1">
+                  <span className="inline-block h-2 w-2 rounded-full bg-red-500 animate-pulse" />
+                  <span className="text-white text-xs font-semibold">LIVE</span>
+                </div>
+              </div>
+
+              {/* Minimal control strip */}
+              <div className="flex items-center justify-between bg-muted/50 rounded-lg px-4 py-2">
+                <div className="flex items-center gap-3 text-sm">
+                  <span className="font-medium">{viewerCount} viewer{viewerCount !== 1 ? "s" : ""}</span>
+                  {currentLotData && currentLotState && (
+                    <span className="text-muted-foreground">
+                      Lot #{currentLotData.lotNumber} · <span className="font-mono font-semibold">{formatCents(currentLotState.currentBidCents ?? currentLotData.startingPriceCents)}</span>
+                    </span>
+                  )}
+                </div>
+                <Button size="sm" variant="destructive" onClick={stopStream}>
+                  Stop Stream
+                </Button>
+              </div>
+
+              {/* Current lot — always visible */}
+              {currentLotData && currentLotState ? (
+                <CurrentLotCard lot={currentLotData} state={currentLotState} />
+              ) : (
+                <div className="flex items-center justify-center h-20 text-muted-foreground text-sm">
+                  No active lot
+                </div>
+              )}
+
+              {/* Auction controls — always visible when lot active */}
+              {currentLot && currentLotState && (
+                <AuctionControlsPanel
+                  lotId={currentLot}
+                  lotStatus={currentLotState.status}
+                  saleMode={currentLotState.saleMode}
+                  hasBids={currentLotState.bidCount > 0 && currentLotState.currentBidCents != null}
+                  hasClaims={currentLotState.quantityClaimed > 0}
+                  quantity={currentLotState.quantity}
+                  quantityClaimed={currentLotState.quantityClaimed}
+                  hasPendingLots={hasPendingLots}
+                  isConnected={isConnected}
+                  onSend={sendMessage}
+                />
+              )}
+
+              {isLotActive && currentLot && currentLotState?.saleMode === "english" && (
+                <FloorBidForm
+                  lotId={currentLot}
+                  nextBidCents={nextBidCents}
+                  isConnected={isConnected}
+                  onSend={sendMessage}
+                />
+              )}
+
+              {/* Lot management — collapsed by default when live */}
+              <div>
+                <button
+                  onClick={() => setLiveControlsOpen(!liveControlsOpen)}
+                  className="flex items-center gap-2 w-full text-left text-sm font-medium text-muted-foreground hover:text-foreground py-1"
+                >
+                  <List className="h-4 w-4" />
+                  Lot Queue & Quick Add ({allLots.length} lots)
+                  {liveControlsOpen ? <ChevronUp className="h-4 w-4 ml-auto" /> : <ChevronDown className="h-4 w-4 ml-auto" />}
+                </button>
+                {liveControlsOpen && (
+                  <div className="border rounded-lg p-3 mt-1 space-y-3">
+                    <div className="max-h-48 overflow-y-auto space-y-1">
+                      {lotQueue}
+                    </div>
+                    <QuickAddLotForm
+                      isConnected={isConnected}
+                      onSend={(msg) => {
+                        pendingAdds.current.push({ title: msg.title, startingPriceCents: msg.startingPriceCents, saleMode: msg.saleMode });
+                        sendMessage(msg);
+                      }}
+                    />
+                  </div>
+                )}
+              </div>
+
+              <BidFeedPanel entries={bidFeed} />
+            </>
+          ) : (
+            <>
+              <StreamPanel
+                streamStatus={streamStatus}
+                cameraError={cameraError}
+                videoRef={videoRef}
+                onStartCamera={startCamera}
+                onStopCamera={stopCamera}
+                onStartStream={startStream}
+                onStopStream={stopStream}
+              />
+
+              {currentLotData && currentLotState ? (
+                <CurrentLotCard lot={currentLotData} state={currentLotState} />
+              ) : (
+                <div className="flex items-center justify-center h-32 text-muted-foreground text-sm">
+                  No active lot
+                </div>
+              )}
+
+              {currentLot && currentLotState && (
+                <AuctionControlsPanel
+                  lotId={currentLot}
+                  lotStatus={currentLotState.status}
+                  saleMode={currentLotState.saleMode}
+                  hasBids={currentLotState.bidCount > 0 && currentLotState.currentBidCents != null}
+                  hasClaims={currentLotState.quantityClaimed > 0}
+                  quantity={currentLotState.quantity}
+                  quantityClaimed={currentLotState.quantityClaimed}
+                  hasPendingLots={hasPendingLots}
+                  isConnected={isConnected}
+                  onSend={sendMessage}
+                />
+              )}
+
+              {isLotActive && currentLot && currentLotState?.saleMode === "english" && (
+                <FloorBidForm
+                  lotId={currentLot}
+                  nextBidCents={nextBidCents}
+                  isConnected={isConnected}
+                  onSend={sendMessage}
+                />
+              )}
+
+              <QuickAddLotForm
+                isConnected={isConnected}
+                onSend={(msg) => {
+                  pendingAdds.current.push({ title: msg.title, startingPriceCents: msg.startingPriceCents, saleMode: msg.saleMode });
+                  sendMessage(msg);
+                }}
+              />
+
+              <BidFeedPanel entries={bidFeed} />
+            </>
           )}
-
-          {isLotActive && currentLot && currentLotState?.saleMode === "english" && (
-            <FloorBidForm
-              lotId={currentLot}
-              nextBidCents={nextBidCents}
-              isConnected={isConnected}
-              onSend={sendMessage}
-            />
-          )}
-
-          <QuickAddLotForm
-            isConnected={isConnected}
-            onSend={(msg) => {
-              pendingAdds.current.push({ title: msg.title, startingPriceCents: msg.startingPriceCents, saleMode: msg.saleMode });
-              sendMessage(msg);
-            }}
-          />
-
-          <BidFeedPanel entries={bidFeed} />
 
           {/* Collapsible chat on small screens */}
           <div className="md:hidden">
