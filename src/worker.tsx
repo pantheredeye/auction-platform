@@ -38,6 +38,7 @@ import { AdminAuctionsPage } from "@/app/pages/admin/auctions/AdminAuctionsPage"
 import { AdminAuctionFormPage } from "@/app/pages/admin/auctions/AdminAuctionFormPage";
 import { AdminLotsPage } from "@/app/pages/admin/auctions/AdminLotsPage";
 import { AuctioneerPage } from "@/app/pages/admin/auctions/AuctioneerPage";
+import { RecordingPage } from "@/app/pages/admin/auctions/RecordingPage";
 
 // Auction pages (buyer-facing)
 import { AuctionsListPage } from "@/app/pages/auctions/AuctionsListPage";
@@ -469,6 +470,7 @@ const app = defineApp([
         route("/auctions/:id/edit", [requireAdmin, AdminAuctionFormPage]),
         route("/auctions/:id/lots", [requireEmployee, AdminLotsPage]),
         route("/auctions/:id/auctioneer", [requireEmployee, AuctioneerPage]),
+        route("/auctions/:id/recording", [requireEmployee, RecordingPage]),
       ]),
     ),
     ...prefix(
