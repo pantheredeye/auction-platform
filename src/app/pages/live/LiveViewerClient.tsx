@@ -84,6 +84,7 @@ function ChatPanel({ messages }: { messages: ChatMessage[] }) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const autoScrollRef = useRef(true);
+  const [hasNewMessages, setHasNewMessages] = useState(false);
 
   // Detect manual scroll-up to pause auto-scroll
   const handleScroll = useCallback(() => {
@@ -92,17 +93,26 @@ function ChatPanel({ messages }: { messages: ChatMessage[] }) {
     // Consider "at bottom" if within 48px of the bottom
     const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 48;
     autoScrollRef.current = atBottom;
+    if (atBottom) setHasNewMessages(false);
   }, []);
 
-  // Auto-scroll on new messages
+  // Auto-scroll on new messages (or flag new messages if scrolled up)
   useEffect(() => {
     if (autoScrollRef.current) {
       bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    } else if (messages.length > 0) {
+      setHasNewMessages(true);
     }
   }, [messages]);
 
+  const scrollToBottom = useCallback(() => {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    autoScrollRef.current = true;
+    setHasNewMessages(false);
+  }, []);
+
   return (
-    <div className="flex flex-col shrink-0 h-[40dvh] md:h-auto md:flex-1 bg-zinc-950">
+    <div className="relative flex flex-col shrink-0 h-[40dvh] md:h-auto md:flex-1 bg-zinc-950">
       <div
         ref={scrollRef}
         onScroll={handleScroll}
@@ -121,6 +131,16 @@ function ChatPanel({ messages }: { messages: ChatMessage[] }) {
         ))}
         <div ref={bottomRef} />
       </div>
+
+      {hasNewMessages && (
+        <button
+          type="button"
+          onClick={scrollToBottom}
+          className="absolute bottom-3 left-1/2 -translate-x-1/2 z-10 min-h-[48px] px-5 rounded-full bg-zinc-800/90 text-white text-lg font-medium shadow-lg backdrop-blur-sm cursor-pointer hover:bg-zinc-700/90 transition-colors"
+        >
+          New messages
+        </button>
+      )}
     </div>
   );
 }
