@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect, useCallback } from "react";
 import type { ServerMessage, AuctionStatus, LotStatus, ChatMessage } from "@/auction/types";
+import { nanoid } from "nanoid";
 import { formatCents, dollarsToCents } from "@/lib/money";
 import { setGuestName } from "./server-functions/guest";
 
@@ -103,6 +104,9 @@ function ChatPanel({
   currentLot,
   onBidTap,
   bidInputElement,
+  confirmingBidCents,
+  onConfirmBid,
+  onCancelConfirm,
 }: {
   messages: ChatMessage[];
   guest: GuestInfo | null;
@@ -116,6 +120,9 @@ function ChatPanel({
   currentLot: CurrentLotData | null;
   onBidTap: () => void;
   bidInputElement?: React.ReactNode;
+  confirmingBidCents?: number | null;
+  onConfirmBid?: (amountCents: number) => void;
+  onCancelConfirm?: () => void;
 }) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
@@ -228,6 +235,32 @@ function ChatPanel({
             >
               {nameSubmitting ? "Joining…" : "Join Chat"}
             </button>
+          </div>
+        </div>
+      )}
+
+      {confirmingBidCents != null && onConfirmBid && onCancelConfirm && (
+        <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/80">
+          <div className="rounded-xl border border-zinc-700 bg-zinc-900 p-6 shadow-lg w-[calc(100%-2rem)] max-w-sm text-center">
+            <p className="text-2xl font-bold text-white mb-6">
+              Bid {formatCents(confirmingBidCents)}?
+            </p>
+            <div className="flex gap-3">
+              <button
+                type="button"
+                onClick={onCancelConfirm}
+                className="flex-1 h-12 rounded-lg border border-zinc-600 bg-zinc-800 text-lg font-semibold text-white cursor-pointer hover:bg-zinc-700 transition-colors"
+              >
+                No
+              </button>
+              <button
+                type="button"
+                onClick={() => onConfirmBid(confirmingBidCents)}
+                className="flex-1 h-12 rounded-lg bg-white text-black text-lg font-semibold cursor-pointer hover:bg-zinc-200 transition-colors"
+              >
+                Yes
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -436,6 +469,7 @@ export function LiveViewerClient({ auction, guest: initialGuest }: LiveViewerCli
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [guest, setGuest] = useState<GuestInfo | null>(initialGuest);
   const [bidMode, setBidMode] = useState(false);
+  const [confirmingBidCents, setConfirmingBidCents] = useState<number | null>(null);
 
   // Incrementing this forces the WS effect to re-run (close + reconnect)
   const [wsReconnectTrigger, setWsReconnectTrigger] = useState(0);
@@ -617,15 +651,23 @@ export function LiveViewerClient({ auction, guest: initialGuest }: LiveViewerCli
   const sendBid = useCallback((amountCents: number) => {
     const ws = wsRef.current;
     if (!ws || ws.readyState !== WebSocket.OPEN || !currentLot) return;
-    const idempotencyKey = `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
     ws.send(JSON.stringify({
       type: "bid",
       lotId: currentLot.id,
       amountCents,
-      idempotencyKey,
+      idempotencyKey: nanoid(),
     }));
+    setConfirmingBidCents(null);
     setBidMode(false);
   }, [currentLot]);
+
+  const handleBidSubmit = useCallback((amountCents: number) => {
+    setConfirmingBidCents(amountCents);
+  }, []);
+
+  const handleBidCancel = useCallback(() => {
+    setConfirmingBidCents(null);
+  }, []);
 
   const handleBidTap = useCallback(() => {
     if (currentLot) setBidMode(true);
@@ -845,10 +887,13 @@ export function LiveViewerClient({ auction, guest: initialGuest }: LiveViewerCli
           <BidInput
             currentLot={currentLot}
             auction={auction}
-            onSubmit={sendBid}
+            onSubmit={handleBidSubmit}
             onCancel={() => setBidMode(false)}
           />
         ) : undefined}
+        confirmingBidCents={confirmingBidCents}
+        onConfirmBid={sendBid}
+        onCancelConfirm={handleBidCancel}
       />
     </div>
   );
