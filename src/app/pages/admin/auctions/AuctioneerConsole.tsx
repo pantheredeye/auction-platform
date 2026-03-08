@@ -3,6 +3,17 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { toast } from "sonner";
 import { QRCodeSVG } from "qrcode.react";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/app/components/ui/alert-dialog";
 import { Badge } from "@/app/components/ui/badge";
 import { Button } from "@/app/components/ui/button";
 import { Card, CardContent } from "@/app/components/ui/card";
@@ -703,9 +714,27 @@ export function AuctioneerConsole({ auction, initialLots }: AuctioneerConsolePro
                     </span>
                   )}
                 </div>
-                <Button variant="destructive" className="h-12 min-h-[48px] px-6 text-base font-semibold" onClick={stopStream}>
-                  End Stream
-                </Button>
+                <AlertDialog>
+                  <AlertDialogTrigger asChild>
+                    <Button variant="destructive" className="h-12 min-h-[48px] px-6 text-base font-semibold">
+                      End Stream
+                    </Button>
+                  </AlertDialogTrigger>
+                  <AlertDialogContent>
+                    <AlertDialogHeader>
+                      <AlertDialogTitle>End the live stream?</AlertDialogTitle>
+                      <AlertDialogDescription>
+                        This will stop the stream for all viewers. This action cannot be undone.
+                      </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                      <AlertDialogCancel className="h-12 min-h-[48px]">Cancel</AlertDialogCancel>
+                      <AlertDialogAction variant="destructive" className="h-12 min-h-[48px]" onClick={stopStream}>
+                        End Stream
+                      </AlertDialogAction>
+                    </AlertDialogFooter>
+                  </AlertDialogContent>
+                </AlertDialog>
               </div>
 
               {/* Current lot — always visible */}
