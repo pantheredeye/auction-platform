@@ -8,6 +8,8 @@ export interface RecordingHandle {
   stop: () => Promise<void>;
   /** Number of chunks uploaded so far */
   chunkCount: () => number;
+  /** Indices of chunks that failed to upload */
+  failedChunks: () => number[];
 }
 
 const TIMESLICE_MS = 30_000;
@@ -29,20 +31,26 @@ async function uploadChunk(
   auctionId: string,
   chunkIndex: number,
   blob: Blob,
+  failedChunks: number[],
 ): Promise<void> {
-  const resp = await fetch(
-    `/api/recordings/${encodeURIComponent(auctionId)}/chunk`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": blob.type || "video/webm",
-        "X-Chunk-Index": String(chunkIndex),
+  try {
+    const resp = await fetch(
+      `/api/recordings/${encodeURIComponent(auctionId)}/chunk?chunkIndex=${chunkIndex}`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": blob.type || "video/webm",
+        },
+        body: blob,
       },
-      body: blob,
-    },
-  );
-  if (!resp.ok) {
-    console.error(`Chunk ${chunkIndex} upload failed: ${resp.status}`);
+    );
+    if (!resp.ok) {
+      console.error(`Chunk ${chunkIndex} upload failed: ${resp.status}`);
+      failedChunks.push(chunkIndex);
+    }
+  } catch (err) {
+    console.error(`Chunk ${chunkIndex} upload error:`, err);
+    failedChunks.push(chunkIndex);
   }
 }
 
@@ -52,6 +60,7 @@ export function startRecording(
 ): RecordingHandle {
   const mimeType = negotiateCodec();
   let chunkIndex = 0;
+  const failedChunks: number[] = [];
 
   const options: MediaRecorderOptions = { videoBitsPerSecond: 2_500_000 };
   if (mimeType) {
@@ -64,7 +73,7 @@ export function startRecording(
     if (e.data.size > 0) {
       const blob = new Blob([e.data], { type: e.data.type || mimeType });
       const idx = chunkIndex++;
-      uploadChunk(auctionId, idx, blob);
+      uploadChunk(auctionId, idx, blob, failedChunks);
     }
   };
 
@@ -81,5 +90,5 @@ export function startRecording(
     });
   };
 
-  return { stop, chunkCount: () => chunkIndex };
+  return { stop, chunkCount: () => chunkIndex, failedChunks: () => [...failedChunks] };
 }

@@ -389,7 +389,7 @@ const app = defineApp([
     }
 
     const auctionId = chunkMatch[1];
-    const chunkIndex = request.headers.get("X-Chunk-Index") ?? "0";
+    const chunkIndex = url.searchParams.get("chunkIndex") ?? "0";
     const timestamp = Date.now();
     const r2Key = `recordings/${auctionId}/${timestamp}-${chunkIndex}`;
 
