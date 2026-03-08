@@ -703,8 +703,8 @@ export function AuctioneerConsole({ auction, initialLots }: AuctioneerConsolePro
                     </span>
                   )}
                 </div>
-                <Button size="sm" variant="destructive" onClick={stopStream}>
-                  Stop Stream
+                <Button variant="destructive" className="h-12 min-h-[48px] px-6 text-base font-semibold" onClick={stopStream}>
+                  End Stream
                 </Button>
               </div>
 
