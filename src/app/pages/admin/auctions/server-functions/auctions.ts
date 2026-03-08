@@ -341,6 +341,28 @@ export async function updateRecordingStatus(
   return { success: true };
 }
 
+export async function getChatMessages(auctionId: string) {
+  const { ctx } = requestInfo;
+  const orgId = ctx.currentOrganization!.id;
+
+  return db
+    .selectFrom("chat_messages")
+    .innerJoin("users", "users.id", "chat_messages.userId")
+    .select([
+      "chat_messages.id",
+      "chat_messages.content",
+      "chat_messages.type",
+      "chat_messages.createdAt",
+      "users.username",
+      "users.displayName",
+    ])
+    .where("chat_messages.auctionId", "=", auctionId)
+    .where("chat_messages.organizationId", "=", orgId)
+    .where("chat_messages.isModerated", "=", 0)
+    .orderBy("chat_messages.createdAt", "asc")
+    .execute();
+}
+
 export async function listAuctioneers() {
   const { ctx } = requestInfo;
   const orgId = ctx.currentOrganization!.id;

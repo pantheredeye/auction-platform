@@ -1,5 +1,5 @@
 import type { RequestInfo } from "rwsdk/worker";
-import { getAuction } from "./server-functions/auctions";
+import { getAuction, getChatMessages } from "./server-functions/auctions";
 import { RecordingClient } from "./RecordingClient";
 
 export async function RecordingPage({ ctx, params }: RequestInfo) {
@@ -25,6 +25,13 @@ export async function RecordingPage({ ctx, params }: RequestInfo) {
   }
 
   const recordingUrl = `/images/recordings/${auctionId}`;
+  const chatMessages = await getChatMessages(auctionId);
 
-  return <RecordingClient recordingUrl={recordingUrl} auction={auction} />;
+  return (
+    <RecordingClient
+      recordingUrl={recordingUrl}
+      auction={auction}
+      chatMessages={chatMessages}
+    />
+  );
 }
