@@ -29,7 +29,7 @@ import type {
 import { formatCents } from "@/lib/money";
 import { imageUrl } from "@/lib/image-url";
 import { transitionAuctionStatus } from "./server-functions/auctions";
-import { Volume2, VolumeX, ChevronDown, ChevronUp, MessageSquare, List, Share2 } from "lucide-react";
+import { Volume2, VolumeX, ChevronDown, ChevronUp, MessageSquare, List, Share2, Loader2 } from "lucide-react";
 import { startRecording, type RecordingHandle } from "@/lib/stream/recording";
 
 // ─── Audio cue via Web Audio API ─────────────────────────────────
@@ -150,6 +150,8 @@ export function AuctioneerConsole({ auction, initialLots }: AuctioneerConsolePro
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const recordingRef = useRef<RecordingHandle | null>(null);
   const [isRecording, setIsRecording] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [endDialogOpen, setEndDialogOpen] = useState(false);
 
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectAttempt = useRef(0);
@@ -333,14 +335,22 @@ export function AuctioneerConsole({ auction, initialLots }: AuctioneerConsolePro
   }, [auction.id, startRecordingForStream, handleAuctionTransition]);
 
   const stopStream = useCallback(async () => {
-    await stopRecordingForStream();
-    if (pcRef.current) {
-      pcRef.current.close();
-      pcRef.current = null;
+    setIsSaving(true);
+    try {
+      // 1. Stop WHIP stream first
+      await fetch(`/ingest/${auction.id}`, { method: "DELETE" }).catch(() => {});
+      // 2. Close peer connection
+      if (pcRef.current) {
+        pcRef.current.close();
+        pcRef.current = null;
+      }
+      // 3. Finalize recording (waits for all chunk uploads)
+      await stopRecordingForStream();
+    } finally {
+      setIsSaving(false);
+      setEndDialogOpen(false);
+      setStreamStatus("previewing");
     }
-    // Clean up tracks in LiveStore DO
-    fetch(`/ingest/${auction.id}`, { method: "DELETE" }).catch(() => {});
-    setStreamStatus("previewing");
   }, [auction.id, stopRecordingForStream]);
 
   // Auto-start camera preview on mount
@@ -714,25 +724,39 @@ export function AuctioneerConsole({ auction, initialLots }: AuctioneerConsolePro
                     </span>
                   )}
                 </div>
-                <AlertDialog>
+                <AlertDialog open={endDialogOpen} onOpenChange={isSaving ? undefined : setEndDialogOpen}>
                   <AlertDialogTrigger asChild>
                     <Button variant="destructive" className="h-12 min-h-[48px] px-6 text-base font-semibold">
                       End Stream
                     </Button>
                   </AlertDialogTrigger>
-                  <AlertDialogContent>
-                    <AlertDialogHeader>
-                      <AlertDialogTitle>End the live stream?</AlertDialogTitle>
-                      <AlertDialogDescription>
-                        This will stop the stream for all viewers. This action cannot be undone.
-                      </AlertDialogDescription>
-                    </AlertDialogHeader>
-                    <AlertDialogFooter>
-                      <AlertDialogCancel className="h-12 min-h-[48px]">Cancel</AlertDialogCancel>
-                      <AlertDialogAction variant="destructive" className="h-12 min-h-[48px]" onClick={stopStream}>
-                        End Stream
-                      </AlertDialogAction>
-                    </AlertDialogFooter>
+                  <AlertDialogContent onEscapeKeyDown={isSaving ? (e) => e.preventDefault() : undefined}>
+                    {isSaving ? (
+                      <AlertDialogHeader>
+                        <AlertDialogTitle>Saving recording</AlertDialogTitle>
+                        <AlertDialogDescription asChild>
+                          <span className="flex items-center gap-2">
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                            Uploading final chunks… Please don't close this page.
+                          </span>
+                        </AlertDialogDescription>
+                      </AlertDialogHeader>
+                    ) : (
+                      <>
+                        <AlertDialogHeader>
+                          <AlertDialogTitle>End the live stream?</AlertDialogTitle>
+                          <AlertDialogDescription>
+                            This will stop the stream for all viewers. This action cannot be undone.
+                          </AlertDialogDescription>
+                        </AlertDialogHeader>
+                        <AlertDialogFooter>
+                          <AlertDialogCancel className="h-12 min-h-[48px]">Cancel</AlertDialogCancel>
+                          <AlertDialogAction variant="destructive" className="h-12 min-h-[48px]" onClick={stopStream}>
+                            End Stream
+                          </AlertDialogAction>
+                        </AlertDialogFooter>
+                      </>
+                    )}
                   </AlertDialogContent>
                 </AlertDialog>
               </div>
