@@ -99,6 +99,8 @@ function ChatPanel({
   onNameChange,
   onNameSubmit,
   nameSubmitting,
+  currentLot,
+  onBidTap,
 }: {
   messages: ChatMessage[];
   guest: GuestInfo | null;
@@ -109,6 +111,8 @@ function ChatPanel({
   onNameChange: (value: string) => void;
   onNameSubmit: () => void;
   nameSubmitting: boolean;
+  currentLot: CurrentLotData | null;
+  onBidTap: () => void;
 }) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
@@ -225,21 +229,63 @@ function ChatPanel({
         </div>
       )}
 
-      <ChatInput guest={guest} onSend={onSend} onNamePrompt={onNamePrompt} />
+      <ChatInput guest={guest} onSend={onSend} onNamePrompt={onNamePrompt} currentLot={currentLot} onBidTap={onBidTap} />
     </div>
   );
 }
 
 // ─── Chat Input ──────────────────────────────────────────────────────
 
+function BidButton({
+  guest,
+  currentLot,
+  onNamePrompt,
+  onBidTap,
+}: {
+  guest: GuestInfo | null;
+  currentLot: CurrentLotData | null;
+  onNamePrompt: () => void;
+  onBidTap: () => void;
+}) {
+  const hasName = Boolean(guest?.name);
+  const disabled = !currentLot;
+
+  const handleClick = () => {
+    if (!hasName) {
+      onNamePrompt();
+      return;
+    }
+    if (!disabled) {
+      onBidTap();
+    }
+  };
+
+  return (
+    <button
+      type="button"
+      onClick={handleClick}
+      disabled={hasName && disabled}
+      title={disabled ? "No active item" : undefined}
+      aria-label="Place bid"
+      className="shrink-0 h-12 w-12 rounded-lg border border-zinc-600 bg-zinc-900 text-lg font-semibold text-white cursor-pointer hover:border-zinc-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+    >
+      $
+    </button>
+  );
+}
+
 function ChatInput({
   guest,
   onSend,
   onNamePrompt,
+  currentLot,
+  onBidTap,
 }: {
   guest: GuestInfo | null;
   onSend: (content: string) => void;
   onNamePrompt: () => void;
+  currentLot: CurrentLotData | null;
+  onBidTap: () => void;
 }) {
   const [value, setValue] = useState("");
   const hasName = Boolean(guest?.name);
@@ -253,20 +299,21 @@ function ChatInput({
 
   if (!hasName) {
     return (
-      <div className="shrink-0 border-t border-zinc-700 p-2">
+      <div className="shrink-0 border-t border-zinc-700 p-2 flex gap-2">
         <button
           type="button"
           onClick={onNamePrompt}
-          className="w-full h-12 px-4 rounded-lg border border-zinc-600 bg-zinc-900 text-lg text-zinc-500 text-left cursor-pointer hover:border-zinc-500 transition-colors"
+          className="flex-1 h-12 px-4 rounded-lg border border-zinc-600 bg-zinc-900 text-lg text-zinc-500 text-left cursor-pointer hover:border-zinc-500 transition-colors"
         >
           Enter your name to chat
         </button>
+        <BidButton guest={guest} currentLot={currentLot} onNamePrompt={onNamePrompt} onBidTap={onBidTap} />
       </div>
     );
   }
 
   return (
-    <div className="shrink-0 border-t border-zinc-700 p-2">
+    <div className="shrink-0 border-t border-zinc-700 p-2 flex gap-2">
       <input
         type="text"
         value={value}
@@ -279,8 +326,9 @@ function ChatInput({
         }}
         placeholder="Type a message…"
         maxLength={500}
-        className="w-full h-12 px-4 rounded-lg border border-zinc-600 bg-zinc-900 text-lg text-white placeholder:text-zinc-500 focus:outline-none focus:ring-2 focus:ring-zinc-400"
+        className="flex-1 min-w-0 h-12 px-4 rounded-lg border border-zinc-600 bg-zinc-900 text-lg text-white placeholder:text-zinc-500 focus:outline-none focus:ring-2 focus:ring-zinc-400"
       />
+      <BidButton guest={guest} currentLot={currentLot} onNamePrompt={onNamePrompt} onBidTap={onBidTap} />
     </div>
   );
 }
@@ -673,6 +721,8 @@ export function LiveViewerClient({ auction, guest: initialGuest }: LiveViewerCli
         onNameChange={setNameValue}
         onNameSubmit={handleNameSubmit}
         nameSubmitting={nameSubmitting}
+        currentLot={currentLot}
+        onBidTap={() => {/* TODO: wire to bid flow */}}
       />
     </div>
   );
