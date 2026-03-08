@@ -373,6 +373,39 @@ const app = defineApp([
     }
   },
 
+  // POST /api/recordings/:auctionId/chunk — upload recording chunk to R2
+  async ({ request, ctx }) => {
+    const url = new URL(request.url);
+    const chunkMatch = url.pathname.match(/^\/api\/recordings\/([^/]+)\/chunk$/);
+    if (!chunkMatch || request.method !== "POST") return;
+
+    // Require employee auth (return JSON errors, not redirects)
+    if (!ctx.user) {
+      return Response.json({ error: "Unauthorized" }, { status: 401 });
+    }
+    const employeeRoles = ["super_admin", "admin", "auctioneer", "catalog_manager", "customer_service", "shipping"];
+    if (!employeeRoles.includes(ctx.currentOrganization?.role ?? "")) {
+      return Response.json({ error: "Forbidden" }, { status: 403 });
+    }
+
+    const auctionId = chunkMatch[1];
+    const chunkIndex = request.headers.get("X-Chunk-Index") ?? "0";
+    const timestamp = Date.now();
+    const r2Key = `recordings/${auctionId}/${timestamp}-${chunkIndex}`;
+
+    try {
+      const body = await request.arrayBuffer();
+      const contentType = request.headers.get("Content-Type") || "video/webm";
+      await env.IMAGES.put(r2Key, body, {
+        httpMetadata: { contentType },
+      });
+      return Response.json({ ok: true, key: r2Key });
+    } catch (err) {
+      console.error("Recording chunk upload failed:", err);
+      return Response.json({ error: "Upload failed" }, { status: 500 });
+    }
+  },
+
   render(Document, [
     route("/", [redirectIfAuth, Landing]),
     ...prefix("/auth", layout(PublicLayout, authRoutes)),
