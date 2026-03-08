@@ -502,6 +502,24 @@ export function LiveViewerClient({ auction, guest: initialGuest }: LiveViewerCli
           if (prev === "live" && derived === "connecting") return "live"; // WHEP already connected
           return derived;
         });
+        // Stream just became available — reset WHEP reconnect counter so next attempt succeeds
+        if (status === "live" && !whepConnectedRef.current) {
+          reconnectAttempt.current = 0;
+        }
+        break;
+      }
+      case "stream_ended": {
+        setStreamStatus("ended");
+        // Stop reconnection + close WHEP
+        if (reconnectTimer.current) {
+          clearTimeout(reconnectTimer.current);
+          reconnectTimer.current = null;
+        }
+        if (pcRef.current) {
+          pcRef.current.close();
+          pcRef.current = null;
+        }
+        whepConnectedRef.current = false;
         break;
       }
       case "viewer_count":
@@ -628,7 +646,7 @@ export function LiveViewerClient({ auction, guest: initialGuest }: LiveViewerCli
 
   const scheduleReconnect = useCallback((url: string) => {
     if (!mountedRef.current) return;
-    if (reconnectAttempt.current >= 5) {
+    if (reconnectAttempt.current >= 15) {
       setStreamStatus("error");
       return;
     }

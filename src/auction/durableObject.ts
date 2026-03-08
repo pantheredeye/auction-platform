@@ -269,6 +269,7 @@ export class AuctionRoomDO extends DurableObject<Cloudflare.Env> {
     const attachment = ws.deserializeAttachment() as SocketAttachment | null;
     if (attachment) {
       this.state.connectedUsers.delete(attachment.userId);
+      this.chatRateLimits.delete(attachment.userId);
     }
     this.state.viewerCount = this.ctx.getWebSockets().length;
     this.broadcast({ type: "viewer_count", count: this.state.viewerCount });
@@ -877,6 +878,7 @@ export class AuctionRoomDO extends DurableObject<Cloudflare.Env> {
     await this.persistState();
     await this.flushBidBuffer();
     await this.flushChatBuffer();
+    this.broadcast({ type: "stream_ended" });
     this.broadcast({
       type: "auction_update",
       status: this.state.status,

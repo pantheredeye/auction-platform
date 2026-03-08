@@ -1,7 +1,83 @@
 ---
 title: "Live Experience"
 created: 2026-03-05
-poured: []
+poured:
+  - auction-platform-mol-o00
+  - auction-platform-mol-v4q
+  - auction-platform-mol-vg8
+  - auction-platform-mol-8td
+  - auction-platform-mol-aky
+  - auction-platform-mol-wt1
+  - auction-platform-mol-z2c
+  - auction-platform-mol-ckl
+  - auction-platform-mol-v1bz
+  - auction-platform-mol-gsha
+  - auction-platform-mol-3ucb
+  - auction-platform-mol-mcqc
+  - auction-platform-mol-9260
+  - auction-platform-mol-qc4z
+  - auction-platform-mol-ovyj
+  - auction-platform-mol-10k1
+  - auction-platform-mol-z8la
+  - auction-platform-mol-o5v8
+  - auction-platform-mol-y4nd
+  - auction-platform-mol-wzkm
+  - auction-platform-mol-mul7
+  - auction-platform-mol-9fgy
+  - auction-platform-mol-uuy2
+  - auction-platform-mol-hpc4
+  - auction-platform-mol-6c22
+  - auction-platform-mol-5ak4
+  - auction-platform-mol-qkza
+  - auction-platform-mol-silh
+  - auction-platform-mol-nhez
+  - auction-platform-mol-zvtx
+  - auction-platform-mol-r4px
+  - auction-platform-mol-pfqi
+  - auction-platform-mol-ct66
+  - auction-platform-mol-sezq
+  - auction-platform-mol-atu2
+  - auction-platform-mol-1hqt
+  - auction-platform-mol-4mv6
+  - auction-platform-mol-vqgo
+  - auction-platform-mol-f6wl
+  - auction-platform-mol-1wom
+  - auction-platform-mol-qqaf
+  - auction-platform-mol-7mas
+  - auction-platform-mol-0x3i
+  - auction-platform-mol-d5wk
+  - auction-platform-mol-yxga
+  - auction-platform-mol-nj88
+  - auction-platform-mol-tgpp
+  - auction-platform-mol-b9b5
+  - auction-platform-mol-phte
+  - auction-platform-mol-jty0
+  - auction-platform-mol-7zsq
+  - auction-platform-mol-f47n
+  - auction-platform-mol-154i
+  - auction-platform-mol-3as1
+  - auction-platform-mol-gp6b
+  - auction-platform-mol-hsw4
+  - auction-platform-mol-2isu
+  - auction-platform-mol-iamg
+  - auction-platform-mol-44mk
+  - auction-platform-mol-8bre
+  - auction-platform-mol-lfq2
+  - auction-platform-mol-yjwb
+  - auction-platform-mol-1amh
+  - auction-platform-mol-5sez
+  - auction-platform-mol-icwp
+  - auction-platform-mol-5dsq
+  - auction-platform-mol-xfvx
+  - auction-platform-mol-xzcs
+  - auction-platform-mol-ygv6
+  - auction-platform-mol-ccar
+  - auction-platform-mol-bp1c
+  - auction-platform-mol-0qer
+  - auction-platform-mol-orpp
+  - auction-platform-mol-k0nb
+  - auction-platform-mol-lrxp
+  - auction-platform-mol-95pj
 iteration: 1
 auto_discovery: false
 auto_learnings: false
@@ -33,19 +109,18 @@ auto_learnings: false
       - Route registration: render(Document, [...prefix("/x", layout(Layout, [route("/y", [interceptor, Page])]))])
     </existing_patterns>
     <integration_points>
-      - src/worker.tsx — add /live/* routes, guest WS upgrade path, recording upload endpoint, chat queue consumer
-      - src/auction/durableObject.ts — add chat buffer + flush (mirror bid buffer pattern)
+      - src/worker.tsx — add /live/* routes, guest WS upgrade path, recording upload endpoint, chat queue consumer, CSP media-src + connect-src for /live/* routes
+      - src/auction/durableObject.ts — add chat buffer + flush (mirror bid buffer pattern), viewer count tracking, state-on-connect message
       - src/auction/types.ts — extend SocketAttachment with isGuest field
       - wrangler.jsonc — add CHAT_EVENTS_QUEUE producer/consumer bindings
-      - src/db/index.ts — chat_messages table already exists; add recording_key + recording_status to auctions
+      - src/db/index.ts — chat_messages table already exists; add recording_key + recording_status to auctions, add unique constraint on auction slug
       - src/lib/r2.ts — reuse uploadImage for recording blobs
       - src/app/components/ui/* — reuse all shadcn primitives
       - AuctionRoomDO — existing DO handles both admin and viewer WebSocket, no changes to bid/lot logic needed
       - LiveStore DO — existing, provides getTracks() for WHEP playback
     </integration_points>
     <new_technologies>
-      - MediaRecorder API: browser-native recording of MediaStream. Use webm/opus codec. Captures from getUserMedia stream already active in auctioneer console. ondataavailable fires with Blob chunks. onstop fires with final blob for upload.
-      - No new server-side tech. All CF Workers + D1 + R2 + Queues (existing stack).
+      - MediaRecorder API: browser-native recording of MediaStream. Use webm/vp8+opus codec with mp4/avc1 fallback for Safari. Captures from getUserMedia stream already active in auctioneer console. ondataavailable with timeslice for periodic chunked upload. No new server-side tech. All CF Workers + D1 + R2 + Queues (existing stack).
     </new_technologies>
     <conventions>
       - Page files: PageName.tsx (RSC) + PageNameClient.tsx (client component)
@@ -64,12 +139,16 @@ auto_learnings: false
       <description>
         Chat messages are broadcast by the DO but never written to D1. Add queue-based persistence
         mirroring the existing bid buffer pattern. The chat_messages table already exists in the schema.
+        DO also keeps a ring buffer of last 50 messages in memory for new-client history.
       </description>
       <steps>
         - Add CHAT_EVENTS_QUEUE producer/consumer bindings to wrangler.jsonc (and staging env)
         - Define BufferedChatEvent type in src/auction/types.ts (auctionId, userId, username, content, createdAt, id)
-        - Add chatBuffer array to AuctionRoomDO, flush at threshold (10) or on auction close
+        - Add chatBuffer array to AuctionRoomDO, flush at threshold (10), on auction close, or via alarm every 30s
+        - Set DO alarm for periodic flush (30s interval) to prevent message loss if DO hibernates or worker crashes
         - In handleChat(), after broadcast, push event to chatBuffer
+        - Keep ring buffer of last 50 messages in DO memory (separate from flush buffer)
+        - On new WS connect, send buffered messages as `chat_history` message (array of recent messages)
         - Create src/queue/chat-events.ts consumer: processChatEvent inserts into chat_messages with onConflict(id).doNothing()
         - Wire consumer in worker.tsx queue() handler for "auction-chat-events" queue prefix
       </steps>
@@ -79,6 +158,8 @@ auto_learnings: false
         3. Send 10+ messages rapidly — verify buffer flushes at threshold
         4. Close auction — verify remaining buffer flushed
         5. Send duplicate message ID — verify idempotent (no duplicate rows)
+        6. Wait 30s with messages in buffer — verify alarm-based flush fires
+        7. Connect a new client mid-auction — verify receives chat_history with recent messages
       </test_steps>
       <review></review>
     </task>
@@ -88,6 +169,7 @@ auto_learnings: false
       <description>
         Cookie-based guest identity for anonymous viewers. No account required. Guest gets a stable
         ID (cookie) and optional display name. Allows WS connection + chat + bidding without auth.
+        Before name is set, guest appears as "Guest" in WS headers. Chat input disabled until name provided.
       </description>
       <steps>
         - Create src/app/lib/guest.ts: getOrCreateGuestId(request) → { guestId: string, guestName: string | null }
@@ -112,14 +194,18 @@ auto_learnings: false
     </task>
 
     <task id="db-migration-recording" priority="1" category="infrastructure">
-      <title>DB Migration: Recording Columns</title>
+      <title>DB Migration: Recording Columns + Slug Constraint</title>
       <description>
         Add recording_key and recording_status columns to the auctions table for stream recording support.
+        Add unique constraint on slug column. Auto-generate slug on auction creation.
       </description>
       <steps>
         - Create D1 migration: ALTER TABLE auctions ADD COLUMN recording_key TEXT
         - ALTER TABLE auctions ADD COLUMN recording_status TEXT DEFAULT 'none'
         - recording_status enum: 'none' | 'recording' | 'uploading' | 'ready' | 'failed'
+        - Add unique constraint on slug column (CREATE UNIQUE INDEX IF NOT EXISTS idx_auctions_slug ON auctions(slug))
+        - Auto-generate unique slug on auction creation: slugified title + random 6-char suffix (nanoid)
+        - Manual slug editing deferred to future iteration
         - Update AuctionsTable type in src/db/index.ts with new columns
         - Run migration against dev/staging/prod D1 databases
       </steps>
@@ -127,34 +213,40 @@ auto_learnings: false
         1. Run migration — verify no errors
         2. Query existing auction rows — verify new columns default to NULL/none
         3. Update an auction's recording_status — verify write succeeds
+        4. Create auction — verify slug is auto-generated and unique
+        5. Attempt duplicate slug insert — verify unique constraint rejects it
       </test_steps>
       <review></review>
     </task>
 
     <task id="stream-recording" priority="2" category="functional">
-      <title>Stream Recording (MediaRecorder + R2)</title>
+      <title>Stream Recording (MediaRecorder + R2 Chunked Upload)</title>
       <description>
         Record the auctioneer's stream via MediaRecorder API on their browser.
-        Upload to R2 on stream end. Store reference in D1 auctions table.
+        Upload chunks periodically to R2 (every 30-60s). Store reference in D1 auctions table.
+        Handles tab close / network drop gracefully (partial recording preserved).
         Depends on: db-migration-recording.
       </description>
       <steps>
-        - Create src/lib/stream/recording.ts: startRecording(stream: MediaStream) → { stop: () => Promise&lt;Blob&gt; }
-        - Uses MediaRecorder with mimeType "video/webm;codecs=vp8,opus" (broad browser support)
-        - Collects chunks via ondataavailable, returns concatenated Blob on stop
-        - Add POST /api/recordings/:auctionId route in worker.tsx (requireEmployee auth)
-        - Route handler: upload blob to R2 at recordings/{auctionId}/{timestamp}.webm
-        - Update auctions row: recording_key = R2 key, recording_status = 'ready'
+        - Create src/lib/stream/recording.ts: startRecording(stream: MediaStream) → { stop: () => Promise&lt;void&gt; }
+        - Codec negotiation: try `video/webm;codecs=vp8,opus` first, fall back to `video/mp4;codecs=avc1` for Safari via MediaRecorder.isTypeSupported()
+        - Use MediaRecorder with `timeslice` param (30000ms) for periodic ondataavailable chunks
+        - On each ondataavailable: upload chunk to R2 at `recordings/{auctionId}/{timestamp}-{chunkIndex}.webm`
+        - Add POST /api/recordings/:auctionId/chunk route in worker.tsx (requireEmployee auth)
+        - On stream end: upload final chunk, update auctions row: recording_status = 'ready'
         - In AuctioneerConsole: start MediaRecorder when WHIP stream starts
-        - On "End Stream": stop recorder, upload blob, show "Recording saved" toast
+        - On "End Stream": stop recorder, upload final chunk, show "Recording saved" toast
         - Handle upload failure gracefully: set recording_status = 'failed', show error toast
+        - On tab close (beforeunload): attempt to upload any remaining data via sendBeacon or navigator.sendBeacon
       </steps>
       <test_steps>
         1. Start stream in auctioneer console — verify MediaRecorder initializes (no errors)
-        2. Stream for 30 seconds, end stream — verify blob is created
-        3. Verify R2 object exists at expected key
-        4. Verify auctions row updated with recording_key and recording_status = 'ready'
-        5. Download recording from R2 — verify playable video with audio
+        2. Stream for 60+ seconds — verify chunks uploaded to R2 periodically
+        3. Verify R2 objects exist at expected keys (recordings/{auctionId}/{timestamp}-{chunkIndex})
+        4. End stream — verify final chunk uploaded, recording_status = 'ready'
+        5. Download recording chunks from R2 — verify playable video with audio
+        6. Test on Safari — verify fallback codec works
+        7. Simulate tab close mid-stream — verify partial recording preserved in R2
       </test_steps>
       <review></review>
     </task>
@@ -185,6 +277,7 @@ auto_learnings: false
       <description>
         Anonymous entry point. Look up auction by slug, render live viewer.
         No auth interruptor. Depends on: live-layout, guest-identity.
+        Includes CSP headers for media and WebSocket on /live/* routes.
       </description>
       <steps>
         - Create src/app/pages/live/LivePage.tsx (RSC): lookup auction by slug from D1, return 404 if not found
@@ -193,22 +286,24 @@ auto_learnings: false
         - Pass auction data + guest context to LiveViewerClient
         - Register route in worker.tsx: route("/live/:slug", [LivePage]) inside layout(LiveLayout, [...])
         - Ensure no auth interruptor on this route
+        - Add CSP headers for /live/* routes: media-src for WHEP playback, connect-src for WebSocket connections
       </steps>
       <test_steps>
         1. Visit /live/valid-slug — verify page loads without login
         2. Visit /live/nonexistent — verify 404 or "not found" message
         3. Visit /live/valid-slug while logged in — verify works (uses real identity, not guest)
         4. Check page source — verify auction data passed to client component
+        5. Inspect response headers — verify CSP includes media-src and connect-src directives
       </test_steps>
       <review></review>
     </task>
 
     <task id="live-viewer-stream" priority="1" category="functional">
-      <title>Live Viewer: Stream Player + Unmute</title>
+      <title>Live Viewer: Stream Player + Unmute + Error State</title>
       <description>
         WHEP video player for /live/:slug. Full-width video, muted autoplay,
         large "Tap to hear audio" overlay. Depends on: live-route.
-        Core of the viewing experience.
+        Core of the viewing experience. Includes explicit error state UI.
       </description>
       <steps>
         - Create src/app/pages/live/LiveViewerClient.tsx with WHEP player section
@@ -219,49 +314,64 @@ auto_learnings: false
         - Stream status states: connecting, live, waiting (not started yet), ended, error
         - "Waiting" state: show "Stream starting soon..." with auction title
         - "Ended" state: show "Auction has ended" message
+        - "Error" state: show "Something went wrong. Try refreshing." with a "Retry" button (plain language per DESIGN.md)
         - Reconnect on disconnect with exponential backoff (reuse pattern)
         - Video fills top portion of viewport (flex-1 on mobile)
+        - On WS connect, read initial state message from DO to set correct UI state (live/waiting/ended)
       </steps>
       <test_steps>
         1. Visit /live/:slug while stream is active — verify video plays (muted)
         2. Tap unmute overlay — verify audio plays, overlay disappears
         3. Visit before stream starts — verify "starting soon" state
         4. Disconnect network briefly — verify auto-reconnect
-        5. Check mobile — verify video fills available space
-        6. Check desktop — verify video fills left portion
+        5. Simulate stream error — verify error state with "Try refreshing" message and Retry button
+        6. Check mobile — verify video fills available space
+        7. Check desktop — verify video fills left portion (70% width)
+        8. Connect mid-auction — verify initial state message sets correct UI (live/waiting/ended)
       </test_steps>
       <review></review>
     </task>
 
-    <task id="live-viewer-chat" priority="1" category="functional">
+    <task id="live-viewer-chat" priority="1" category="functional" depends_on="chat-persistence">
       <title>Live Viewer: Chat Display + Input</title>
       <description>
         Chat panel with scrolling messages, bid highlighting, and text input.
-        Integrates with WebSocket. Depends on: live-viewer-stream, guest-identity.
+        Integrates with WebSocket. Depends on: live-viewer-stream, guest-identity, chat-persistence.
+        DO tracks viewer count and broadcasts on connect/disconnect.
+        Desktop layout: video 70% / chat 30%.
       </description>
       <steps>
         - Add WebSocket connection to LiveViewerClient (reuse pattern, connect to /ws/auction/:id)
         - Guest WS: connects using guest identity (no auth required per guest-identity task)
+        - On WS connect, DO sends current state message: auction status, current lot, current bid, viewer count
+        - DO tracks connected socket count, broadcasts `viewer_count` message on connect/disconnect
+        - Client displays viewer count in status bar from WS messages
         - Chat message list: scrollable, auto-scroll, pause on manual scroll-up
         - "↓ New messages" button when scrolled up and new messages arrive
         - Messages: 18px font, white on dark, username bold, timestamp subtle
         - Bid messages: highlighted with ★ prefix, distinct background (amber/gold tint), font-semibold
-        - Chat input: h-12 text-lg, visible border, placeholder "Type a message..."
-        - If guest has no name yet: tapping input triggers guest name prompt (see next task)
-        - If guest has name: input is active, sends chat message on Enter
+        - Chat input: h-12 text-lg, visible border
+        - Before name is set: chat input disabled with placeholder "Enter your name to chat"
+        - Tapping disabled chat input triggers guest name prompt
+        - If guest has name: input is active, placeholder "Type a message...", sends chat message on Enter
         - Mobile: chat panel below video, ~35-40% of viewport, scrollable independently
-        - Desktop (md+): chat panel to the right of video, flex column
-        - Status bar between video and chat: "🔴 LIVE · {count} watching" or status text
+        - Desktop (md+): video 70% width, chat panel 30% width, flex column to the right
+        - Status bar between video and chat: "LIVE · {count} watching" or status text
       </steps>
       <test_steps>
         1. Connect as guest — verify WebSocket connects, viewer count updates
-        2. Send chat message — verify appears in chat for all viewers
-        3. Scroll up in chat — verify auto-scroll pauses, "new messages" button appears
-        4. Tap "new messages" — verify scrolls to bottom, auto-scroll resumes
-        5. Verify bid messages have ★ prefix and highlight
-        6. Check 18px font size on all chat text
-        7. Check mobile layout — chat below video, scrollable
-        8. Check desktop layout — chat beside video
+        2. Verify initial state message received (auction status, current bid, viewer count)
+        3. Connect second client — verify viewer count increments for both
+        4. Disconnect client — verify viewer count decrements
+        5. Send chat message — verify appears in chat for all viewers
+        6. Without name set — verify chat input is disabled with "Enter your name to chat" placeholder
+        7. Tap disabled input — verify name prompt triggers
+        8. Scroll up in chat — verify auto-scroll pauses, "new messages" button appears
+        9. Tap "new messages" — verify scrolls to bottom, auto-scroll resumes
+        10. Verify bid messages have ★ prefix and highlight
+        11. Check 18px font size on all chat text
+        12. Check mobile layout — chat below video, scrollable
+        13. Check desktop layout — video 70%, chat 30% beside video
       </test_steps>
       <review></review>
     </task>
@@ -269,28 +379,33 @@ auto_learnings: false
     <task id="live-viewer-guest-prompt" priority="1" category="functional">
       <title>Live Viewer: Guest Name Prompt</title>
       <description>
-        When anonymous viewer first tries to chat or bid, prompt for their name.
-        Single field, one tap. Sets cookie. Reconnects WS with name.
+        When anonymous viewer first tries to chat or bid, prompt for first name.
+        Name is mandatory for chat and bidding — no "Just watch" bypass for those actions.
+        Viewers can still watch the stream without providing a name.
         Depends on: live-viewer-chat, guest-identity.
       </description>
       <steps>
-        - Trigger: user taps chat input and has no guest_name cookie
+        - Trigger: user taps disabled chat input or bid button and has no guest_name cookie
         - Show inline card (not modal, not blocking video): "What's your name?"
-        - Single input field: h-12 text-lg, placeholder "Your name"
+        - Single input field: h-12 text-lg, placeholder "Your first name"
         - Single button: "Join Chat" — h-12, full width, prominent
-        - On submit: call setGuestName() server function to set cookie
-        - Close prompt, reconnect WebSocket with new name in headers
+        - On submit: await setGuestName() server function response (ensures cookie is set before next step)
+        - After cookie confirmed set: close prompt, reconnect WebSocket with new name in headers
+        - Race condition fix: WS reconnect must wait for setGuestName() to complete so cookie is present on WS upgrade
         - Input auto-focuses when prompt appears
-        - No timeout — prompt stays until user acts or dismisses
-        - Dismiss option: small "Just watch" link below button (keeps them anonymous viewer, no chat)
+        - No "Just watch" dismiss option — name is required for chat/bid participation
+        - Stream continues playing during prompt (not blocked)
+        - No timeout — prompt stays until user submits
       </steps>
       <test_steps>
-        1. Visit as new guest, tap chat input — verify name prompt appears
-        2. Enter name, tap "Join Chat" — verify prompt closes, name cookie set
-        3. Send message — verify username shows in chat
-        4. Refresh page — verify name persists (cookie), no re-prompt
-        5. Tap "Just watch" — verify prompt dismissed, chat input disabled with "Enter name to chat" hint
-        6. Verify video continues playing during prompt (not blocked)
+        1. Visit as new guest — verify chat input disabled with "Enter your name to chat" placeholder
+        2. Tap disabled chat input — verify name prompt appears
+        3. Verify stream continues playing during prompt
+        4. Enter name, tap "Join Chat" — verify prompt closes, name cookie set
+        5. Verify WS reconnects only after cookie is confirmed set (no race condition)
+        6. Send message — verify username shows in chat
+        7. Refresh page — verify name persists (cookie), no re-prompt, chat input enabled
+        8. Try to bid without name — verify name prompt appears first
       </test_steps>
       <review></review>
     </task>
@@ -299,11 +414,13 @@ auto_learnings: false
       <title>Live Viewer: Bid Button + Confirmation</title>
       <description>
         Bid entry for viewers. "$" button next to chat input opens bid amount entry.
-        Confirmation before submission. Depends on: live-viewer-chat.
+        Confirmation before submission. Requires guest name before bidding.
+        Depends on: live-viewer-chat.
       </description>
       <steps>
         - "$" button next to chat input: h-12 w-12, visible, labeled with "$" text
-        - On tap: replace chat input with bid amount input (numeric, h-12 text-lg)
+        - If no guest name: tapping "$" triggers guest name prompt first (same as chat)
+        - On tap (with name): replace chat input with bid amount input (numeric, h-12 text-lg)
         - Show current high bid as reference: "Current: $50 — Minimum: $55"
         - On submit: show confirmation overlay "Bid $55?" with [Yes] and [No] buttons
         - Both buttons: h-12, large text, clear labels, high contrast
@@ -312,43 +429,16 @@ auto_learnings: false
         - On bid_rejected: toast with rejection reason in plain language
         - "Cancel" or tap outside to return to chat input
         - If no active lot: bid button disabled with "No active item" tooltip
-        - Alternative: detect numeric-only chat input as bid intent, prompt "Did you mean to bid $55?"
       </steps>
       <test_steps>
-        1. Tap "$" button — verify bid input appears with current bid reference
-        2. Enter amount, submit — verify confirmation dialog with [Yes] [No]
-        3. Confirm bid — verify bid_accepted toast, bid appears in chat as highlighted
-        4. Submit bid below minimum — verify bid_rejected with clear reason
-        5. Cancel bid — verify returns to chat input
-        6. Check button sizes — verify 48px minimum on all interactive elements
-        7. Test with no active lot — verify bid button disabled
-      </test_steps>
-      <review></review>
-    </task>
-
-    <task id="live-viewer-post-auction" priority="3" category="functional">
-      <title>Live Viewer: Post-Auction Prompt</title>
-      <description>
-        When auction ends, show overlay prompting for phone number for future notifications.
-        Optional, dismissable. Depends on: live-viewer-stream.
-      </description>
-      <steps>
-        - Trigger: auction_update message with status "closed"
-        - Show overlay on top of ended stream: "Thanks for joining!"
-        - Subtitle: "Want a heads-up next time Stan goes live?"
-        - Phone number input: h-12 text-lg, type="tel", placeholder "(555) 555-1234"
-        - [Notify Me] button: h-12, prominent, full width
-        - [Skip] button: below, subtle but still 48px target
-        - On submit: store phone + guest_id via server function (new table or field)
-        - On skip: dismiss overlay, show "Auction ended" static message
-        - No timeout on this prompt
-      </steps>
-      <test_steps>
-        1. End auction — verify overlay appears with prompt
-        2. Enter phone, tap "Notify Me" — verify stored, overlay dismisses with "You'll hear from us!" message
-        3. Tap "Skip" — verify overlay dismisses cleanly
-        4. Check phone input is tel type (numeric keyboard on mobile)
-        5. Check all touch targets are 48px+
+        1. Try to bid without name — verify name prompt appears first
+        2. Tap "$" button (with name) — verify bid input appears with current bid reference
+        3. Enter amount, submit — verify confirmation dialog with [Yes] [No]
+        4. Confirm bid — verify bid_accepted toast, bid appears in chat as highlighted
+        5. Submit bid below minimum — verify bid_rejected with clear reason
+        6. Cancel bid — verify returns to chat input
+        7. Check button sizes — verify 48px minimum on all interactive elements
+        8. Test with no active lot — verify bid button disabled
       </test_steps>
       <review></review>
     </task>
@@ -457,11 +547,15 @@ auto_learnings: false
 
   <success_criteria>
     - Anonymous user can tap a link and watch a live stream with zero registration
-    - Guest can set a name and chat/bid without creating an account
+    - Guest can set a first name and chat/bid without creating an account
+    - Chat input disabled until name provided; stream viewable without name
     - Auctioneer can go live with a single tap and share the link easily
-    - All streams are recorded and reviewable with chat replay
-    - All chat messages persisted to D1 for review
+    - All streams are recorded via chunked upload (partial recordings survive failures)
+    - All chat messages persisted to D1 for review; last 50 available to new joiners
+    - Viewer count tracked and displayed in real-time
     - Mobile experience is accessible for 20-85 year olds (18px font, 48px targets, plain language)
+    - Desktop layout: video 70% / chat 30%
+    - Error states use plain language with retry options
     - No changes to existing admin/management app surfaces
   </success_criteria>
 

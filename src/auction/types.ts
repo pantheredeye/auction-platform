@@ -147,6 +147,7 @@ export type ServerMessage =
   | { type: "viewer_count"; count: number }
   | { type: "pong" }
   | { type: "chat_history"; messages: ChatMessage[] }
+  | { type: "stream_ended" }
   | { type: "error"; message: string };
 
 export type AdminMessage =

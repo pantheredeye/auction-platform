@@ -292,6 +292,17 @@ const app = defineApp([
       const auctionId = ingestDeleteMatch[1];
       const doId = env.LIVE_STORE.idFromName(auctionId);
       const store = env.LIVE_STORE.get(doId);
+      // Close Calls sessions before deleting track references
+      const tracks = await store.getTracks();
+      const sessionIds = [...new Set(tracks.map((t) => t.sessionId))];
+      await Promise.allSettled(
+        sessionIds.map((sid) =>
+          fetch(`${callsApi}/sessions/${sid}/close`, {
+            method: "PUT",
+            headers: callsAuth,
+          }),
+        ),
+      );
       await store.deleteTracks();
       return new Response(null, { status: 204, headers: corsHeaders });
     }
