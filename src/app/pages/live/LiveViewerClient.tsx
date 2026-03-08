@@ -382,14 +382,32 @@ export function LiveViewerClient({ auction, guest }: LiveViewerClientProps) {
           )}
         </div>
 
-        {/* Status area */}
+        {/* Status bar */}
         <div className="shrink-0 bg-zinc-900 px-4 py-3">
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between gap-3">
             <h1 className="text-lg font-semibold text-white truncate">
               {auction.title}
             </h1>
-            <div className="flex items-center gap-2 text-sm text-zinc-400">
-              <span>{viewerCount} watching</span>
+            <div className="flex items-center gap-3 shrink-0">
+              {streamStatus === "live" && (
+                <span className="inline-flex items-center gap-1.5 rounded bg-green-600 px-2.5 py-1 text-sm font-semibold text-white uppercase tracking-wide">
+                  <span className="inline-block h-2 w-2 rounded-full bg-white animate-pulse" aria-hidden="true" />
+                  Live
+                </span>
+              )}
+              {streamStatus === "waiting" && (
+                <span className="text-lg text-zinc-300 font-medium">Starting soon</span>
+              )}
+              {streamStatus === "ended" && (
+                <span className="text-lg text-zinc-400 font-medium">Ended</span>
+              )}
+              {streamStatus === "connecting" && (
+                <span className="text-lg text-zinc-400 font-medium">Connecting…</span>
+              )}
+              {streamStatus === "error" && (
+                <span className="text-lg text-red-400 font-medium">Error</span>
+              )}
+              <span className="text-lg text-zinc-400">{viewerCount} watching</span>
             </div>
           </div>
         </div>
