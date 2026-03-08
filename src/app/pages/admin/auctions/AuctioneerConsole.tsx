@@ -18,7 +18,7 @@ import type {
 import { formatCents } from "@/lib/money";
 import { imageUrl } from "@/lib/image-url";
 import { transitionAuctionStatus } from "./server-functions/auctions";
-import { Volume2, VolumeX, ChevronDown, ChevronUp, MessageSquare, List } from "lucide-react";
+import { Volume2, VolumeX, ChevronDown, ChevronUp, MessageSquare, List, Share2 } from "lucide-react";
 
 // ─── Audio cue via Web Audio API ─────────────────────────────────
 
@@ -827,15 +827,20 @@ export function AuctioneerConsole({ auction, initialLots }: AuctioneerConsolePro
               className="w-full min-h-[48px] text-sm font-medium"
               onClick={async () => {
                 const url = `${window.location.origin}/live/${auction.slug}`;
-                try {
+                if (navigator.share) {
+                  try {
+                    await navigator.share({ title: auction.title, url });
+                  } catch {
+                    // user cancelled
+                  }
+                } else {
                   await navigator.clipboard.writeText(url);
-                  toast.success("Link copied!");
-                } catch {
-                  toast.error("Failed to copy link");
+                  toast.success("Link copied to clipboard");
                 }
               }}
             >
-              Copy Link
+              <Share2 className="h-4 w-4" />
+              Share
             </Button>
           </div>
 
