@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect, useCallback } from "react";
 import type { ServerMessage, AuctionStatus, LotStatus, ChatMessage } from "@/auction/types";
+import { setGuestName } from "./server-functions/guest";
 
 // ─── Types ──────────────────────────────────────────────────────────
 
@@ -97,6 +98,7 @@ function ChatPanel({
   nameValue,
   onNameChange,
   onNameSubmit,
+  nameSubmitting,
 }: {
   messages: ChatMessage[];
   guest: GuestInfo | null;
@@ -106,6 +108,7 @@ function ChatPanel({
   nameValue: string;
   onNameChange: (value: string) => void;
   onNameSubmit: () => void;
+  nameSubmitting: boolean;
 }) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
@@ -207,15 +210,16 @@ function ChatPanel({
               placeholder="Your first name"
               maxLength={50}
               autoFocus
-              className="w-full h-12 px-4 rounded-lg border border-zinc-600 bg-zinc-800 text-lg text-white placeholder:text-zinc-500 focus:outline-none focus:ring-2 focus:ring-zinc-400 mb-3"
+              disabled={nameSubmitting}
+              className="w-full h-12 px-4 rounded-lg border border-zinc-600 bg-zinc-800 text-lg text-white placeholder:text-zinc-500 focus:outline-none focus:ring-2 focus:ring-zinc-400 mb-3 disabled:opacity-50"
             />
             <button
               type="button"
               onClick={onNameSubmit}
-              disabled={!nameValue.trim()}
+              disabled={!nameValue.trim() || nameSubmitting}
               className="w-full h-12 rounded-lg bg-white text-black text-lg font-semibold cursor-pointer hover:bg-zinc-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              Join Chat
+              {nameSubmitting ? "Joining…" : "Join Chat"}
             </button>
           </div>
         </div>
@@ -281,13 +285,14 @@ function ChatInput({
   );
 }
 
-export function LiveViewerClient({ auction, guest }: LiveViewerClientProps) {
+export function LiveViewerClient({ auction, guest: initialGuest }: LiveViewerClientProps) {
   const [streamStatus, setStreamStatus] = useState<StreamStatus>("connecting");
   const [muted, setMuted] = useState(true);
   const [viewerCount, setViewerCount] = useState(0);
   const [auctionStatus, setAuctionStatus] = useState<AuctionStatus>(auction.status as AuctionStatus);
   const [currentLot, setCurrentLot] = useState<CurrentLotData | null>(null);
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [guest, setGuest] = useState<GuestInfo | null>(initialGuest);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const pcRef = useRef<RTCPeerConnection | null>(null);
@@ -459,14 +464,27 @@ export function LiveViewerClient({ auction, guest }: LiveViewerClientProps) {
 
   const [showNamePrompt, setShowNamePrompt] = useState(false);
   const [nameValue, setNameValue] = useState("");
+  const [nameSubmitting, setNameSubmitting] = useState(false);
 
   const handleNamePrompt = useCallback(() => {
     setShowNamePrompt(true);
   }, []);
 
-  const handleNameSubmit = useCallback(() => {
-    // TODO: call setGuestName server function + reconnect WS (wired by separate epic)
-  }, []);
+  const handleNameSubmit = useCallback(async () => {
+    const trimmed = nameValue.trim();
+    if (!trimmed || nameSubmitting) return;
+
+    setNameSubmitting(true);
+    try {
+      const ok = await setGuestName(trimmed);
+      if (!ok) return;
+      setGuest((prev) => prev ? { ...prev, name: trimmed } : prev);
+      setShowNamePrompt(false);
+      setNameValue("");
+    } finally {
+      setNameSubmitting(false);
+    }
+  }, [nameValue, nameSubmitting]);
 
   useEffect(() => {
     let wsReconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -649,6 +667,7 @@ export function LiveViewerClient({ auction, guest }: LiveViewerClientProps) {
         nameValue={nameValue}
         onNameChange={setNameValue}
         onNameSubmit={handleNameSubmit}
+        nameSubmitting={nameSubmitting}
       />
     </div>
   );
