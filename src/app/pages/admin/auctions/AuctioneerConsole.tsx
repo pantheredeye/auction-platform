@@ -59,7 +59,9 @@ function playDing() {
 // ─── Types ──────────────────────────────────────────────────────────
 
 type ConnectionStatus = "connecting" | "connected" | "reconnecting" | "disconnected";
-type StreamStatus = "idle" | "previewing" | "connecting" | "live" | "error";
+type StreamStatus = "idle" | "previewing" | "connecting" | "live" | "error" | "ended";
+
+type RecordingResult = { success: true } | { success: false; failedCount: number };
 
 interface BidFeedEntry {
   lotId: string;
@@ -152,6 +154,9 @@ export function AuctioneerConsole({ auction, initialLots }: AuctioneerConsolePro
   const [isRecording, setIsRecording] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [endDialogOpen, setEndDialogOpen] = useState(false);
+  const [recordingResult, setRecordingResult] = useState<RecordingResult | null>(null);
+  const streamStartedAtRef = useRef<number | null>(null);
+  const [streamDurationSecs, setStreamDurationSecs] = useState<number>(0);
 
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectAttempt = useRef(0);
@@ -254,8 +259,8 @@ export function AuctioneerConsole({ auction, initialLots }: AuctioneerConsolePro
     }
   }, [auction.id]);
 
-  const stopRecordingForStream = useCallback(async () => {
-    if (!recordingRef.current) return;
+  const stopRecordingForStream = useCallback(async (): Promise<RecordingResult> => {
+    if (!recordingRef.current) return { success: true };
     const handle = recordingRef.current;
     recordingRef.current = null;
     setIsRecording(false);
@@ -263,12 +268,11 @@ export function AuctioneerConsole({ auction, initialLots }: AuctioneerConsolePro
       await handle.stop();
       const failed = handle.failedChunks();
       if (failed.length > 0) {
-        toast.error(`Recording saved with ${failed.length} failed chunk(s)`);
-      } else {
-        toast.success("Recording saved");
+        return { success: false, failedCount: failed.length };
       }
+      return { success: true };
     } catch {
-      toast.error("Recording failed");
+      return { success: false, failedCount: -1 };
     }
   }, []);
 
@@ -308,6 +312,7 @@ export function AuctioneerConsole({ auction, initialLots }: AuctioneerConsolePro
 
       pc.onconnectionstatechange = () => {
         if (pc.connectionState === "connected") {
+          streamStartedAtRef.current = Date.now();
           setStreamStatus("live");
         } else if (pc.connectionState === "failed" || pc.connectionState === "disconnected") {
           setStreamStatus("error");
@@ -315,6 +320,7 @@ export function AuctioneerConsole({ auction, initialLots }: AuctioneerConsolePro
       };
 
       if (pc.connectionState === "connected") {
+        streamStartedAtRef.current = Date.now();
         setStreamStatus("live");
       }
     } catch (err) {
@@ -337,6 +343,13 @@ export function AuctioneerConsole({ auction, initialLots }: AuctioneerConsolePro
   const stopStream = useCallback(async () => {
     setIsSaving(true);
     try {
+      // Capture duration before cleanup
+      const duration = streamStartedAtRef.current
+        ? Math.round((Date.now() - streamStartedAtRef.current) / 1000)
+        : 0;
+      streamStartedAtRef.current = null;
+      setStreamDurationSecs(duration);
+
       // 1. Stop WHIP stream first
       await fetch(`/ingest/${auction.id}`, { method: "DELETE" }).catch(() => {});
       // 2. Close peer connection
@@ -345,11 +358,22 @@ export function AuctioneerConsole({ auction, initialLots }: AuctioneerConsolePro
         pcRef.current = null;
       }
       // 3. Finalize recording (waits for all chunk uploads)
-      await stopRecordingForStream();
+      const result = await stopRecordingForStream();
+      setRecordingResult(result);
+
+      if (result.success) {
+        toast.success("Stream ended. Recording saved.");
+      } else {
+        toast.error(
+          result.failedCount === -1
+            ? "Recording failed"
+            : `Recording saved with ${result.failedCount} failed chunk(s)`,
+        );
+      }
     } finally {
       setIsSaving(false);
       setEndDialogOpen(false);
-      setStreamStatus("previewing");
+      setStreamStatus("ended");
     }
   }, [auction.id, stopRecordingForStream]);
 
@@ -696,7 +720,20 @@ export function AuctioneerConsole({ auction, initialLots }: AuctioneerConsolePro
             </div>
           )}
 
-          {isLive ? (
+          {streamStatus === "ended" ? (
+            <PostStreamSummary
+              title={auction.title}
+              slug={auction.slug}
+              durationSecs={streamDurationSecs}
+              recordingResult={recordingResult}
+              onRetry={async () => {
+                // Re-attempt by resetting to previewing so auctioneer can start fresh
+                setRecordingResult(null);
+                setStreamStatus("idle");
+                startCamera();
+              }}
+            />
+          ) : isLive ? (
             <>
               {/* Expanded video when live — no card wrapper, fills main area */}
               <div className="relative flex-shrink-0">
@@ -1452,12 +1489,101 @@ function FloorBidForm({
   );
 }
 
+function formatDuration(secs: number): string {
+  const h = Math.floor(secs / 3600);
+  const m = Math.floor((secs % 3600) / 60);
+  const s = secs % 60;
+  if (h > 0) return `${h}h ${m}m ${s}s`;
+  if (m > 0) return `${m}m ${s}s`;
+  return `${s}s`;
+}
+
+function PostStreamSummary({
+  title,
+  slug,
+  durationSecs,
+  recordingResult,
+  onRetry,
+}: {
+  title: string;
+  slug: string;
+  durationSecs: number;
+  recordingResult: RecordingResult | null;
+  onRetry: () => void;
+}) {
+  const auctionUrl = typeof window !== "undefined" ? `${window.location.origin}/live/${slug}` : `/live/${slug}`;
+  const [copied, setCopied] = useState(false);
+
+  const copyLink = async () => {
+    await navigator.clipboard.writeText(auctionUrl);
+    setCopied(true);
+    toast.success("Link copied to clipboard");
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  const failed = recordingResult && !recordingResult.success;
+
+  return (
+    <Card className="py-3">
+      <CardContent className="space-y-4">
+        <div className="flex items-center gap-2">
+          <span className="inline-block h-2 w-2 rounded-full bg-gray-500" />
+          <span className="text-sm font-medium">Stream Ended</span>
+        </div>
+
+        <div className="space-y-2">
+          <h3 className="text-lg font-semibold">{title}</h3>
+          <div className="flex items-center gap-4 text-sm text-muted-foreground">
+            <span>Duration: <span className="font-mono font-medium text-foreground">{formatDuration(durationSecs)}</span></span>
+          </div>
+        </div>
+
+        {/* Recording status */}
+        {recordingResult && (
+          <div className={`rounded-lg border p-3 ${failed ? "border-red-500/30 bg-red-500/5" : "border-green-500/30 bg-green-500/5"}`}>
+            {failed ? (
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-sm text-red-600 dark:text-red-400 font-medium">
+                  {recordingResult.failedCount === -1
+                    ? "Recording failed"
+                    : `Recording saved with ${recordingResult.failedCount} failed chunk(s)`}
+                </p>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="min-h-[48px] px-4 border-red-500/30 text-red-600 dark:text-red-400 hover:bg-red-500/10"
+                  onClick={onRetry}
+                >
+                  Retry
+                </Button>
+              </div>
+            ) : (
+              <p className="text-sm text-green-600 dark:text-green-400 font-medium">Recording saved</p>
+            )}
+          </div>
+        )}
+
+        {/* Copy auction link */}
+        <Button
+          variant="outline"
+          className="w-full min-h-[48px] text-sm font-medium"
+          onClick={copyLink}
+        >
+          <Share2 className="h-4 w-4" />
+          {copied ? "Copied!" : "Copy Auction Link"}
+        </Button>
+      </CardContent>
+    </Card>
+  );
+}
+
 const STREAM_STATUS_LABELS: Record<StreamStatus, { label: string; color: string }> = {
   idle: { label: "Camera Off", color: "bg-gray-500" },
   previewing: { label: "Preview", color: "bg-blue-500" },
   connecting: { label: "Connecting...", color: "bg-yellow-500 animate-pulse" },
   live: { label: "Live", color: "bg-red-500 animate-pulse" },
   error: { label: "Error", color: "bg-red-500" },
+  ended: { label: "Stream Ended", color: "bg-gray-500" },
 };
 
 function StreamPanel({
