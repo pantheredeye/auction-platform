@@ -19,6 +19,7 @@ import { formatCents } from "@/lib/money";
 import { imageUrl } from "@/lib/image-url";
 import { transitionAuctionStatus } from "./server-functions/auctions";
 import { Volume2, VolumeX, ChevronDown, ChevronUp, MessageSquare, List, Share2 } from "lucide-react";
+import { startRecording, type RecordingHandle } from "@/lib/stream/recording";
 
 // ─── Audio cue via Web Audio API ─────────────────────────────────
 
@@ -136,8 +137,8 @@ export function AuctioneerConsole({ auction, initialLots }: AuctioneerConsolePro
   const videoRef = useRef<HTMLVideoElement>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const pcRef = useRef<RTCPeerConnection | null>(null);
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const recordedChunksRef = useRef<Blob[]>([]);
+  const recordingRef = useRef<RecordingHandle | null>(null);
+  const [isRecording, setIsRecording] = useState(false);
 
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectAttempt = useRef(0);
@@ -157,10 +158,22 @@ export function AuctioneerConsole({ auction, initialLots }: AuctioneerConsolePro
         sendMessage({ type: "start_auction" });
       } else if (toStatus === "closed") {
         sendMessage({ type: "close_auction" });
-        // Stop recorder + stream + clean up tracks
-        if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
-          mediaRecorderRef.current.stop();
-          mediaRecorderRef.current = null;
+        // Stop recording, stream, clean up
+        if (recordingRef.current) {
+          const handle = recordingRef.current;
+          recordingRef.current = null;
+          setIsRecording(false);
+          try {
+            await handle.stop();
+            const failed = handle.failedChunks();
+            if (failed.length > 0) {
+              toast.error(`Recording saved with ${failed.length} failed chunk(s)`);
+            } else {
+              toast.success("Recording saved");
+            }
+          } catch {
+            toast.error("Recording failed");
+          }
         }
         if (pcRef.current) {
           pcRef.current.close();
@@ -216,34 +229,33 @@ export function AuctioneerConsole({ auction, initialLots }: AuctioneerConsolePro
     setStreamStatus("idle");
   }, []);
 
-  const startMediaRecorder = useCallback(() => {
+  const startRecordingForStream = useCallback(() => {
     if (!mediaStreamRef.current) return;
-    recordedChunksRef.current = [];
-    const mimeType = MediaRecorder.isTypeSupported("video/webm;codecs=vp9,opus")
-      ? "video/webm;codecs=vp9,opus"
-      : MediaRecorder.isTypeSupported("video/webm;codecs=vp8,opus")
-        ? "video/webm;codecs=vp8,opus"
-        : "video/webm";
     try {
-      const recorder = new MediaRecorder(mediaStreamRef.current, {
-        mimeType,
-        videoBitsPerSecond: 2_500_000,
-      });
-      recorder.ondataavailable = (e) => {
-        if (e.data.size > 0) recordedChunksRef.current.push(e.data);
-      };
-      recorder.start(5000); // 5s timeslice chunks
-      mediaRecorderRef.current = recorder;
+      const handle = startRecording(mediaStreamRef.current, auction.id);
+      recordingRef.current = handle;
+      setIsRecording(true);
     } catch (err) {
-      console.error("MediaRecorder start failed:", err);
+      console.error("Recording start failed:", err);
       // Non-fatal: stream still works without recording
     }
-  }, []);
+  }, [auction.id]);
 
-  const stopMediaRecorder = useCallback(() => {
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
-      mediaRecorderRef.current.stop();
-      mediaRecorderRef.current = null;
+  const stopRecordingForStream = useCallback(async () => {
+    if (!recordingRef.current) return;
+    const handle = recordingRef.current;
+    recordingRef.current = null;
+    setIsRecording(false);
+    try {
+      await handle.stop();
+      const failed = handle.failedChunks();
+      if (failed.length > 0) {
+        toast.error(`Recording saved with ${failed.length} failed chunk(s)`);
+      } else {
+        toast.success("Recording saved");
+      }
+    } catch {
+      toast.error("Recording failed");
     }
   }, []);
 
@@ -275,8 +287,8 @@ export function AuctioneerConsole({ auction, initialLots }: AuctioneerConsolePro
       const answerSdp = await resp.text();
       await pc.setRemoteDescription({ type: "answer", sdp: answerSdp });
 
-      // Start MediaRecorder reusing same getUserMedia stream
-      startMediaRecorder();
+      // Start recording reusing same getUserMedia stream
+      startRecordingForStream();
 
       // Transition auction status to live
       handleAuctionTransition("live");
@@ -295,17 +307,22 @@ export function AuctioneerConsole({ auction, initialLots }: AuctioneerConsolePro
     } catch (err) {
       console.error("Stream start failed:", err);
       toast.error("Failed to start stream");
-      stopMediaRecorder();
+      // Clean up recording if it was started
+      if (recordingRef.current) {
+        recordingRef.current.stop().catch(() => {});
+        recordingRef.current = null;
+        setIsRecording(false);
+      }
       if (pcRef.current) {
         pcRef.current.close();
         pcRef.current = null;
       }
       setStreamStatus("previewing");
     }
-  }, [auction.id, startMediaRecorder, stopMediaRecorder, handleAuctionTransition]);
+  }, [auction.id, startRecordingForStream, handleAuctionTransition]);
 
-  const stopStream = useCallback(() => {
-    stopMediaRecorder();
+  const stopStream = useCallback(async () => {
+    await stopRecordingForStream();
     if (pcRef.current) {
       pcRef.current.close();
       pcRef.current = null;
@@ -313,7 +330,7 @@ export function AuctioneerConsole({ auction, initialLots }: AuctioneerConsolePro
     // Clean up tracks in LiveStore DO
     fetch(`/ingest/${auction.id}`, { method: "DELETE" }).catch(() => {});
     setStreamStatus("previewing");
-  }, [auction.id, stopMediaRecorder]);
+  }, [auction.id, stopRecordingForStream]);
 
   // Auto-start camera preview on mount
   useEffect(() => {
@@ -323,8 +340,9 @@ export function AuctioneerConsole({ auction, initialLots }: AuctioneerConsolePro
   // Cleanup camera/stream/recorder on unmount
   useEffect(() => {
     return () => {
-      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
-        mediaRecorderRef.current.stop();
+      if (recordingRef.current) {
+        recordingRef.current.stop().catch(() => {});
+        recordingRef.current = null;
       }
       if (pcRef.current) {
         pcRef.current.close();
@@ -758,6 +776,7 @@ export function AuctioneerConsole({ auction, initialLots }: AuctioneerConsolePro
                 streamStatus={streamStatus}
                 cameraError={cameraError}
                 videoRef={videoRef}
+                isRecording={isRecording}
                 onStartCamera={startCamera}
                 onStopCamera={stopCamera}
                 onStartStream={startStream}
@@ -1392,6 +1411,7 @@ function StreamPanel({
   streamStatus,
   cameraError,
   videoRef,
+  isRecording,
   onStartCamera,
   onStopCamera,
   onStartStream,
@@ -1400,6 +1420,7 @@ function StreamPanel({
   streamStatus: StreamStatus;
   cameraError: string | null;
   videoRef: React.RefObject<HTMLVideoElement | null>;
+  isRecording: boolean;
   onStartCamera: () => void;
   onStopCamera: () => void;
   onStartStream: () => void;
@@ -1448,6 +1469,12 @@ function StreamPanel({
           <div className="flex items-center gap-2">
             <span className={`inline-block h-2 w-2 rounded-full ${color}`} />
             <span className="text-sm font-medium">{label}</span>
+            {isRecording && (
+              <span className="flex items-center gap-1 ml-2 text-xs text-red-500">
+                <span className="inline-block h-1.5 w-1.5 rounded-full bg-red-500 animate-pulse" />
+                REC
+              </span>
+            )}
           </div>
           <div className="flex items-center gap-2">
             {streamStatus === "previewing" && (
