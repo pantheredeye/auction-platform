@@ -122,6 +122,7 @@ export interface ChatMessage {
   username: string;
   content: string;
   createdAt: string;
+  messageType?: "chat" | "bid";
 }
 
 export interface ChatHistoryMessage {

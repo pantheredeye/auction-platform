@@ -80,6 +80,14 @@ function auctionStatusToStreamStatus(status: AuctionStatus, hasActiveStream: boo
 
 // ─── Chat Panel ──────────────────────────────────────────────────────
 
+function formatTime(iso: string): string {
+  try {
+    return new Date(iso).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  } catch {
+    return "";
+  }
+}
+
 function ChatPanel({ messages }: { messages: ChatMessage[] }) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
@@ -123,12 +131,22 @@ function ChatPanel({ messages }: { messages: ChatMessage[] }) {
             No messages yet
           </p>
         )}
-        {messages.map((msg) => (
-          <div key={msg.id} className="text-lg">
-            <span className="font-semibold text-zinc-300">{msg.username}</span>
-            <span className="text-zinc-100 ml-2">{msg.content}</span>
-          </div>
-        ))}
+        {messages.map((msg) => {
+          const isBid = msg.messageType === "bid";
+          return (
+            <div
+              key={msg.id}
+              className={`text-lg rounded px-2 py-1 ${isBid ? "bg-amber-900/40 font-semibold" : ""}`}
+            >
+              {isBid && <span className="mr-1" aria-label="Bid">★</span>}
+              <span className="font-bold text-zinc-300">{msg.username}</span>
+              <span className="text-zinc-100 ml-2">{msg.content}</span>
+              <span className="text-sm text-zinc-500 ml-2">
+                {formatTime(msg.createdAt)}
+              </span>
+            </div>
+          );
+        })}
         <div ref={bottomRef} />
       </div>
 
