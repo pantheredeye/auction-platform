@@ -69,11 +69,15 @@ export function startRecording(
 
   const recorder = new MediaRecorder(stream, options);
 
+  // Track in-flight uploads so stop() can wait for them
+  const pendingUploads: Promise<void>[] = [];
+
   recorder.ondataavailable = (e) => {
     if (e.data.size > 0) {
       const blob = new Blob([e.data], { type: e.data.type || mimeType });
       const idx = chunkIndex++;
-      uploadChunk(auctionId, idx, blob, failedChunks);
+      const p = uploadChunk(auctionId, idx, blob, failedChunks);
+      pendingUploads.push(p);
     }
   };
 
@@ -85,7 +89,12 @@ export function startRecording(
         resolve();
         return;
       }
-      recorder.onstop = () => resolve();
+      recorder.onstop = async () => {
+        // Wait for all uploads (including the final chunk) to complete
+        await Promise.all(pendingUploads);
+        resolve();
+      };
+      // Triggers one last ondataavailable before onstop
       recorder.stop();
     });
   };

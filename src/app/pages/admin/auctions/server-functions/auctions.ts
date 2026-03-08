@@ -319,6 +319,28 @@ export async function deleteAuction(id: string) {
   return { success: true };
 }
 
+export async function updateRecordingStatus(
+  auctionId: string,
+  status: "recording" | "uploading" | "ready" | "failed",
+) {
+  const { ctx } = requestInfo;
+  const orgId = ctx.currentOrganization!.id;
+
+  const result = await db
+    .updateTable("auctions")
+    .set({ recording_status: status, updatedAt: new Date().toISOString() })
+    .where("id", "=", auctionId)
+    .where("organizationId", "=", orgId)
+    .execute();
+
+  if (!result[0]?.numUpdatedRows) {
+    throw new Error("Auction not found");
+  }
+
+  await logAudit("auction", auctionId, "update", { recording_status: status });
+  return { success: true };
+}
+
 export async function listAuctioneers() {
   const { ctx } = requestInfo;
   const orgId = ctx.currentOrganization!.id;
