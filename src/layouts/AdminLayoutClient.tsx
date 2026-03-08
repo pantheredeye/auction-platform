@@ -28,6 +28,7 @@ import {
   SheetTitle,
   SheetTrigger,
 } from "@/app/components/ui/sheet";
+import { Toaster } from "@/app/components/ui/sonner";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -236,6 +237,7 @@ export function AdminLayoutClient({
 
       {/* Main content */}
       <main className="flex-1 p-4 md:p-6">{children}</main>
+      <Toaster position="top-center" />
     </div>
   );
 }

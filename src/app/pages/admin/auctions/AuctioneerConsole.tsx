@@ -811,6 +811,21 @@ export function AuctioneerConsole({ auction, initialLots }: AuctioneerConsolePro
           <div className="rounded-lg border bg-muted/30 p-3 space-y-1.5">
             <h2 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Share</h2>
             <p className="text-sm font-mono break-all select-all">{`${typeof window !== "undefined" ? window.location.origin : ""}/live/${auction.slug}`}</p>
+            <Button
+              variant="outline"
+              className="w-full min-h-[48px] text-sm font-medium"
+              onClick={async () => {
+                const url = `${window.location.origin}/live/${auction.slug}`;
+                try {
+                  await navigator.clipboard.writeText(url);
+                  toast.success("Link copied!");
+                } catch {
+                  toast.error("Failed to copy link");
+                }
+              }}
+            >
+              Copy Link
+            </Button>
           </div>
 
           {/* Collapsible chat on small screens */}
