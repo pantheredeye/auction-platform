@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import { toast } from "sonner";
+import { QRCodeSVG } from "qrcode.react";
 import { Badge } from "@/app/components/ui/badge";
 import { Button } from "@/app/components/ui/button";
 import { Card, CardContent } from "@/app/components/ui/card";
@@ -811,6 +812,16 @@ export function AuctioneerConsole({ auction, initialLots }: AuctioneerConsolePro
           <div className="rounded-lg border bg-muted/30 p-3 space-y-1.5">
             <h2 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Share</h2>
             <p className="text-sm font-mono break-all select-all">{`${typeof window !== "undefined" ? window.location.origin : ""}/live/${auction.slug}`}</p>
+            <div className="flex justify-center py-2">
+              <QRCodeSVG
+                value={`${typeof window !== "undefined" ? window.location.origin : ""}/live/${auction.slug}`}
+                size={160}
+                level="M"
+                bgColor="#ffffff"
+                fgColor="#000000"
+                className="rounded"
+              />
+            </div>
             <Button
               variant="outline"
               className="w-full min-h-[48px] text-sm font-medium"
