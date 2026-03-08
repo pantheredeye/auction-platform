@@ -131,6 +131,7 @@ export function AuctioneerConsole({ auction, initialLots }: AuctioneerConsolePro
 
   // Stream state
   const [streamStatus, setStreamStatus] = useState<StreamStatus>("idle");
+  const [cameraError, setCameraError] = useState<string | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const pcRef = useRef<RTCPeerConnection | null>(null);
@@ -169,6 +170,7 @@ export function AuctioneerConsole({ auction, initialLots }: AuctioneerConsolePro
   }, [auction.id, auction.version, sendMessage]);
 
   const startCamera = useCallback(async () => {
+    setCameraError(null);
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
       mediaStreamRef.current = stream;
@@ -176,9 +178,14 @@ export function AuctioneerConsole({ auction, initialLots }: AuctioneerConsolePro
         videoRef.current.srcObject = stream;
       }
       setStreamStatus("previewing");
-    } catch (err) {
+    } catch (err: any) {
       console.error("Camera access denied:", err);
-      toast.error("Camera access denied. Please allow camera and microphone permissions.");
+      const msg = err?.name === "NotAllowedError"
+        ? "Camera access denied. Please allow camera and microphone permissions in your browser settings."
+        : err?.name === "NotFoundError"
+          ? "No camera or microphone found. Please connect a device and try again."
+          : "Could not access camera. Please check your device and permissions.";
+      setCameraError(msg);
       setStreamStatus("error");
     }
   }, []);
@@ -261,6 +268,11 @@ export function AuctioneerConsole({ auction, initialLots }: AuctioneerConsolePro
     fetch(`/ingest/${auction.id}`, { method: "DELETE" }).catch(() => {});
     setStreamStatus("previewing");
   }, [auction.id]);
+
+  // Auto-start camera preview on mount
+  useEffect(() => {
+    startCamera();
+  }, [startCamera]);
 
   // Cleanup camera/stream on unmount
   useEffect(() => {
@@ -593,6 +605,7 @@ export function AuctioneerConsole({ auction, initialLots }: AuctioneerConsolePro
 
           <StreamPanel
             streamStatus={streamStatus}
+            cameraError={cameraError}
             videoRef={videoRef}
             onStartCamera={startCamera}
             onStopCamera={stopCamera}
@@ -1188,6 +1201,7 @@ const STREAM_STATUS_LABELS: Record<StreamStatus, { label: string; color: string 
 
 function StreamPanel({
   streamStatus,
+  cameraError,
   videoRef,
   onStartCamera,
   onStopCamera,
@@ -1195,6 +1209,7 @@ function StreamPanel({
   onStopStream,
 }: {
   streamStatus: StreamStatus;
+  cameraError: string | null;
   videoRef: React.RefObject<HTMLVideoElement | null>;
   onStartCamera: () => void;
   onStopCamera: () => void;
@@ -1202,18 +1217,38 @@ function StreamPanel({
   onStopStream: () => void;
 }) {
   const { label, color } = STREAM_STATUS_LABELS[streamStatus];
-  const showVideo = streamStatus !== "idle";
+  const showVideo = streamStatus === "previewing" || streamStatus === "connecting" || streamStatus === "live";
 
+  // Idle state: camera is starting up automatically
   if (streamStatus === "idle") {
     return (
-      <div className="flex items-center justify-center py-12">
-        <button
-          onClick={onStartCamera}
-          className="w-full max-w-md bg-red-600 hover:bg-red-700 active:bg-red-800 text-white text-xl font-bold h-16 rounded-xl transition-colors cursor-pointer"
-        >
-          GO LIVE
-        </button>
-      </div>
+      <Card className="py-3">
+        <CardContent className="space-y-3">
+          <div className="flex items-center justify-center aspect-video bg-black rounded-lg">
+            <p className="text-zinc-400 text-lg">Starting camera...</p>
+          </div>
+          <video ref={videoRef} autoPlay muted playsInline className="hidden" />
+        </CardContent>
+      </Card>
+    );
+  }
+
+  // Error state: permission denied or no device
+  if (streamStatus === "error") {
+    return (
+      <Card className="py-3">
+        <CardContent className="space-y-3">
+          <div className="flex flex-col items-center justify-center aspect-video bg-black rounded-lg p-6 text-center gap-4">
+            <p className="text-red-400 text-lg font-medium">
+              {cameraError ?? "Camera error"}
+            </p>
+            <Button size="lg" variant="secondary" onClick={onStartCamera} className="h-12 text-lg">
+              Retry Camera
+            </Button>
+          </div>
+          <video ref={videoRef} autoPlay muted playsInline className="hidden" />
+        </CardContent>
+      </Card>
     );
   }
 
@@ -1227,14 +1262,9 @@ function StreamPanel({
           </div>
           <div className="flex items-center gap-2">
             {streamStatus === "previewing" && (
-              <>
-                <Button size="sm" onClick={onStartStream}>
-                  Go Live
-                </Button>
-                <Button size="sm" variant="ghost" onClick={onStopCamera}>
-                  Stop Camera
-                </Button>
-              </>
+              <Button size="sm" variant="ghost" onClick={onStopCamera}>
+                Stop Camera
+              </Button>
             )}
             {streamStatus === "connecting" && (
               <Button size="sm" variant="ghost" disabled>
@@ -1246,11 +1276,6 @@ function StreamPanel({
                 Stop Stream
               </Button>
             )}
-            {streamStatus === "error" && (
-              <Button size="sm" variant="secondary" onClick={onStopCamera}>
-                Reset
-              </Button>
-            )}
           </div>
         </div>
         <video
@@ -1260,6 +1285,14 @@ function StreamPanel({
           playsInline
           className={`w-full rounded-lg bg-black ${showVideo ? "aspect-video" : "hidden"}`}
         />
+        {streamStatus === "previewing" && (
+          <button
+            onClick={onStartStream}
+            className="w-full bg-red-600 hover:bg-red-700 active:bg-red-800 text-white text-xl font-bold h-16 rounded-xl transition-colors cursor-pointer"
+          >
+            GO LIVE
+          </button>
+        )}
       </CardContent>
     </Card>
   );
