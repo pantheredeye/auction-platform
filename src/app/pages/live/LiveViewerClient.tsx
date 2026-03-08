@@ -92,17 +92,26 @@ function ChatPanel({
   messages,
   guest,
   onSend,
+  showNamePrompt,
   onNamePrompt,
+  nameValue,
+  onNameChange,
+  onNameSubmit,
 }: {
   messages: ChatMessage[];
   guest: GuestInfo | null;
   onSend: (content: string) => void;
+  showNamePrompt: boolean;
   onNamePrompt: () => void;
+  nameValue: string;
+  onNameChange: (value: string) => void;
+  onNameSubmit: () => void;
 }) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const autoScrollRef = useRef(true);
   const [hasNewMessages, setHasNewMessages] = useState(false);
+  const nameInputRef = useRef<HTMLInputElement | null>(null);
 
   // Detect manual scroll-up to pause auto-scroll
   const handleScroll = useCallback(() => {
@@ -168,6 +177,40 @@ function ChatPanel({
         >
           New messages
         </button>
+      )}
+
+      {showNamePrompt && (
+        <div className="absolute inset-x-0 bottom-0 z-20 p-3">
+          <div className="rounded-xl border border-zinc-700 bg-zinc-900 p-4 shadow-lg">
+            <h2 className="text-lg font-semibold text-white mb-3">
+              What&apos;s your name?
+            </h2>
+            <input
+              ref={nameInputRef}
+              type="text"
+              value={nameValue}
+              onChange={(e) => onNameChange(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  onNameSubmit();
+                }
+              }}
+              placeholder="Your first name"
+              maxLength={50}
+              autoFocus
+              className="w-full h-12 px-4 rounded-lg border border-zinc-600 bg-zinc-800 text-lg text-white placeholder:text-zinc-500 focus:outline-none focus:ring-2 focus:ring-zinc-400 mb-3"
+            />
+            <button
+              type="button"
+              onClick={onNameSubmit}
+              disabled={!nameValue.trim()}
+              className="w-full h-12 rounded-lg bg-white text-black text-lg font-semibold cursor-pointer hover:bg-zinc-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Join Chat
+            </button>
+          </div>
+        </div>
       )}
 
       <ChatInput guest={guest} onSend={onSend} onNamePrompt={onNamePrompt} />
@@ -406,9 +449,15 @@ export function LiveViewerClient({ auction, guest }: LiveViewerClientProps) {
     }
   }, []);
 
-  // Stub: will be wired to guest name prompt card by a separate epic
+  const [showNamePrompt, setShowNamePrompt] = useState(false);
+  const [nameValue, setNameValue] = useState("");
+
   const handleNamePrompt = useCallback(() => {
-    // TODO: show guest name prompt inline card
+    setShowNamePrompt(true);
+  }, []);
+
+  const handleNameSubmit = useCallback(() => {
+    // TODO: call setGuestName server function + reconnect WS (wired by separate epic)
   }, []);
 
   useEffect(() => {
@@ -587,7 +636,11 @@ export function LiveViewerClient({ auction, guest }: LiveViewerClientProps) {
         messages={chatMessages}
         guest={guest}
         onSend={sendChatMessage}
+        showNamePrompt={showNamePrompt}
         onNamePrompt={handleNamePrompt}
+        nameValue={nameValue}
+        onNameChange={setNameValue}
+        onNameSubmit={handleNameSubmit}
       />
     </div>
   );
