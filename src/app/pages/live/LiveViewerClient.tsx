@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import type { ServerMessage, AuctionStatus, LotStatus, ChatMessage } from "@/auction/types";
 import { nanoid } from "nanoid";
+import { toast } from "sonner";
 import { formatCents, dollarsToCents } from "@/lib/money";
 import { setGuestName } from "./server-functions/guest";
 
@@ -534,6 +535,15 @@ export function LiveViewerClient({ auction, guest: initialGuest }: LiveViewerCli
         break;
       case "chat_message":
         setChatMessages((prev) => [...prev, msg]);
+        break;
+      case "bid_accepted":
+        toast.success(`Your bid of ${formatCents(msg.amountCents)} was placed!`);
+        setBidMode(false);
+        setConfirmingBidCents(null);
+        break;
+      case "bid_rejected":
+        toast.error(msg.reason);
+        setConfirmingBidCents(null);
         break;
       case "pong":
         break;
