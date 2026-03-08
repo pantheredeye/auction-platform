@@ -37,6 +37,7 @@ import {
   Trash2,
   ArrowRight,
   Radio,
+  Play,
 } from "lucide-react";
 import {
   listAuctions,
@@ -54,6 +55,7 @@ interface Auction {
   scheduledStartAt: string | null;
   lotCount: number;
   version: number;
+  recording_status: string;
   createdAt: string;
 }
 
@@ -303,11 +305,18 @@ export function AdminAuctionsClient({
                       : "—"}
                   </TableCell>
                   <TableCell>{auction.lotCount}</TableCell>
-                  <TableCell>
+                  <TableCell className="space-x-1">
                     {(auction.status === "live" || auction.status === "closing") && (
                       <a href={`/admin/auctions/${auction.id}/auctioneer`}>
                         <Button size="xs" variant="default" className="bg-green-600 hover:bg-green-700 text-white gap-1">
                           <Radio size={12} /> Control Room
+                        </Button>
+                      </a>
+                    )}
+                    {auction.recording_status === "ready" && (
+                      <a href={`/admin/auctions/${auction.id}/recording`}>
+                        <Button size="xs" variant="outline" className="gap-1">
+                          <Play size={12} /> View Recording
                         </Button>
                       </a>
                     )}
