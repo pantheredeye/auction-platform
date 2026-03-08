@@ -294,6 +294,9 @@ export function LiveViewerClient({ auction, guest: initialGuest }: LiveViewerCli
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [guest, setGuest] = useState<GuestInfo | null>(initialGuest);
 
+  // Incrementing this forces the WS effect to re-run (close + reconnect)
+  const [wsReconnectTrigger, setWsReconnectTrigger] = useState(0);
+
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -481,6 +484,8 @@ export function LiveViewerClient({ auction, guest: initialGuest }: LiveViewerCli
       setGuest((prev) => prev ? { ...prev, name: trimmed } : prev);
       setShowNamePrompt(false);
       setNameValue("");
+      // Force WS reconnect so new connection includes guest_name cookie
+      setWsReconnectTrigger((n) => n + 1);
     } finally {
       setNameSubmitting(false);
     }
@@ -543,7 +548,7 @@ export function LiveViewerClient({ auction, guest: initialGuest }: LiveViewerCli
       wsRef.current?.close();
       wsRef.current = null;
     };
-  }, [auction.id, handleServerMessage]);
+  }, [auction.id, handleServerMessage, wsReconnectTrigger]);
 
   return (
     <div className="flex flex-col md:flex-row min-h-dvh bg-black">
