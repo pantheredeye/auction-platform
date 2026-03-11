@@ -2,15 +2,20 @@
 import { env } from "cloudflare:workers";
 import { db } from "@/db";
 import { getStripe } from "@/stripe/client";
+import { requestInfo } from "rwsdk/worker";
+
+export const CURRENT_PLATFORM_TERMS_VERSION = "2026-03-01";
 
 export async function createBidder({
   name,
   email,
   guestId,
+  acceptedTermsVersion,
 }: {
   name: string;
   email: string;
   guestId: string;
+  acceptedTermsVersion?: string;
 }): Promise<{ userId: string; userName: string }> {
   if (!name?.trim()) throw new Error("Name is required");
   if (!email?.trim()) throw new Error("Email is required");
@@ -86,6 +91,28 @@ export async function createBidder({
     .onConflict((oc) => oc.columns(["guestId", "userId"]).doNothing())
     .execute();
 
+  // Record terms acceptance if provided
+  if (acceptedTermsVersion) {
+    const request = requestInfo.request;
+    const ipAddress =
+      request.headers.get("CF-Connecting-IP") ??
+      request.headers.get("X-Forwarded-For")?.split(",")[0]?.trim() ??
+      "unknown";
+
+    await db
+      .insertInto("terms_acceptances")
+      .values({
+        id: crypto.randomUUID(),
+        userId,
+        termsType: "platform",
+        termsVersion: acceptedTermsVersion,
+        organizationId: "",
+        acceptedAt: now,
+        ipAddress,
+      })
+      .execute();
+  }
+
   return { userId, userName: trimmedName };
 }
 
@@ -93,17 +120,19 @@ export async function createBidderAndSetupIntent({
   name,
   email,
   guestId,
+  acceptedTermsVersion,
 }: {
   name: string;
   email: string;
   guestId: string;
+  acceptedTermsVersion?: string;
 }): Promise<{
   userId: string;
   clientSecret: string;
   publishableKey: string;
 }> {
   // Reuse createBidder for user + bidder_registration creation
-  const { userId } = await createBidder({ name, email, guestId });
+  const { userId } = await createBidder({ name, email, guestId, acceptedTermsVersion });
 
   const stripe = getStripe(env.STRIPE_SECRET_KEY);
   const normalizedEmail = email.toLowerCase().trim();

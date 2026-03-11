@@ -52,6 +52,9 @@ import { AuctionRoomPage } from "@/app/pages/auctions/AuctionRoomPage";
 // Live pages (viewer-facing)
 import { LivePage } from "@/app/pages/live/LivePage";
 
+// Terms page
+import { TermsPage } from "@/app/pages/terms/TermsPage";
+
 // Queue consumers
 import { processShopifyImport } from "@/queue/shopify-import";
 import { processBidEvent } from "@/queue/bid-events";
@@ -513,6 +516,7 @@ const app = defineApp([
 
   render(Document, [
     route("/", [redirectIfAuth, Landing]),
+    route("/terms", TermsPage),
     ...prefix("/auth", layout(PublicLayout, authRoutes)),
     ...layout(AuthenticatedLayout, [
       route("/dashboard", [requireAuth, Dashboard]),

@@ -9,6 +9,7 @@ import {
   createBidder,
   createBidderAndSetupIntent,
   savePaymentMethod,
+  CURRENT_PLATFORM_TERMS_VERSION,
 } from "@/stripe/server-functions/setup";
 import { loadStripe, type Stripe } from "@stripe/stripe-js";
 import {
@@ -105,8 +106,10 @@ function RegisteredTier({
 }) {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
+  const [termsAccepted, setTermsAccepted] = useState(false);
   const [nameError, setNameError] = useState<string | null>(null);
   const [emailError, setEmailError] = useState<string | null>(null);
+  const [termsError, setTermsError] = useState<string | null>(null);
   const [serverError, setServerError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -133,6 +136,13 @@ function RegisteredTier({
         setEmailError(null);
       }
 
+      if (!termsAccepted) {
+        setTermsError("You must accept the Terms of Service");
+        hasError = true;
+      } else {
+        setTermsError(null);
+      }
+
       if (hasError) return;
 
       setServerError(null);
@@ -143,6 +153,7 @@ function RegisteredTier({
           name: trimmedName,
           email: trimmedEmail,
           guestId,
+          acceptedTermsVersion: CURRENT_PLATFORM_TERMS_VERSION,
         });
         onComplete({ userId: result.userId, name: result.userName, hasCard: false });
       } catch {
@@ -151,7 +162,7 @@ function RegisteredTier({
         setSubmitting(false);
       }
     },
-    [name, email, guestId, onComplete]
+    [name, email, guestId, termsAccepted, onComplete]
   );
 
   return (
@@ -201,6 +212,16 @@ function RegisteredTier({
         )}
       </div>
 
+      <TermsCheckbox
+        checked={termsAccepted}
+        onChange={(checked) => {
+          setTermsAccepted(checked);
+          if (termsError) setTermsError(null);
+        }}
+        error={termsError}
+        id="reg-terms"
+      />
+
       {serverError && (
         <p className="text-sm font-medium text-red-400">{serverError}</p>
       )}
@@ -242,8 +263,10 @@ function CardOnFileTier({
   const [step, setStep] = useState<"info" | "card">("info");
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
+  const [termsAccepted, setTermsAccepted] = useState(false);
   const [nameError, setNameError] = useState<string | null>(null);
   const [emailError, setEmailError] = useState<string | null>(null);
+  const [termsError, setTermsError] = useState<string | null>(null);
   const [serverError, setServerError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [stripeData, setStripeData] = useState<{
@@ -275,6 +298,13 @@ function CardOnFileTier({
         setEmailError(null);
       }
 
+      if (!termsAccepted) {
+        setTermsError("You must accept the Terms of Service");
+        hasError = true;
+      } else {
+        setTermsError(null);
+      }
+
       if (hasError) return;
 
       setServerError(null);
@@ -285,6 +315,7 @@ function CardOnFileTier({
           name: trimmedName,
           email: trimmedEmail,
           guestId,
+          acceptedTermsVersion: CURRENT_PLATFORM_TERMS_VERSION,
         });
         setStripeData(result);
         setStep("card");
@@ -294,7 +325,7 @@ function CardOnFileTier({
         setSubmitting(false);
       }
     },
-    [name, email, guestId]
+    [name, email, guestId, termsAccepted]
   );
 
   if (step === "card" && stripeData) {
@@ -359,6 +390,16 @@ function CardOnFileTier({
           </p>
         )}
       </div>
+
+      <TermsCheckbox
+        checked={termsAccepted}
+        onChange={(checked) => {
+          setTermsAccepted(checked);
+          if (termsError) setTermsError(null);
+        }}
+        error={termsError}
+        id="cof-terms"
+      />
 
       {serverError && (
         <p className="text-sm font-medium text-red-400">{serverError}</p>
@@ -487,6 +528,49 @@ function CardStep({
         Back
       </button>
     </form>
+  );
+}
+
+function TermsCheckbox({
+  checked,
+  onChange,
+  error,
+  id,
+}: {
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+  error: string | null;
+  id: string;
+}) {
+  return (
+    <div className="space-y-2">
+      <label className="flex min-h-12 cursor-pointer items-center gap-3">
+        <input
+          type="checkbox"
+          checked={checked}
+          onChange={(e) => onChange(e.target.checked)}
+          className="size-5 shrink-0 accent-white"
+          aria-invalid={!!error}
+          aria-describedby={error ? `${id}-error` : undefined}
+        />
+        <span className="text-base text-zinc-300">
+          I agree to the{" "}
+          <a
+            href="/terms"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-white underline hover:text-zinc-200"
+          >
+            Terms of Service
+          </a>
+        </span>
+      </label>
+      {error && (
+        <p id={`${id}-error`} className="text-sm font-medium text-red-400">
+          {error}
+        </p>
+      )}
+    </div>
   );
 }
 
