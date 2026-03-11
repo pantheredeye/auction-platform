@@ -19,6 +19,9 @@ declare namespace Cloudflare {
 		IMPORT_QUEUE: Queue;
 		BID_EVENTS_QUEUE: Queue;
 		CHAT_EVENTS_QUEUE: Queue;
+		STRIPE_SECRET_KEY: string;
+		STRIPE_PUBLISHABLE_KEY: string;
+		STRIPE_WEBHOOK_SECRET: string;
 		ASSETS: Fetcher;
 	}
 }

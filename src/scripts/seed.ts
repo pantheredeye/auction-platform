@@ -12,6 +12,8 @@ export default async () => {
       slug: "mm-auctions",
       type: "auction_house",
       hammerFeePct: 300,
+      bidderRequirement: "guest",
+      stripeConnectAccountId: null,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     })

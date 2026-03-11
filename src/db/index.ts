@@ -21,6 +21,7 @@ export interface UsersTable {
   authMethod: string;
   failedLoginAttempts: number;
   lockoutUntil: string | null;
+  stripeCustomerId: string | null;
   isPlatformAdmin: number;
   createdAt: string;
   deletedAt: string | null;
@@ -41,6 +42,8 @@ export interface OrganizationsTable {
   slug: string;
   type: string;
   hammerFeePct: number;
+  bidderRequirement: string;
+  stripeConnectAccountId: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -144,6 +147,7 @@ export interface AuctionsTable {
   streamUrl: string | null;
   recording_key: string | null;
   recording_status: string;
+  bidderRequirement: string | null;
   auctioneerId: string | null;
   createdByUserId: string;
   clonedFromAuctionId: string | null;
@@ -284,6 +288,37 @@ export interface InvoicesTable {
   version: number;
 }
 
+export interface PaymentMethodsTable {
+  id: string;
+  userId: string;
+  stripePaymentMethodId: string;
+  last4: string;
+  brand: string;
+  expMonth: number;
+  expYear: number;
+  isDefault: number;
+  status: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface BidderRegistrationsTable {
+  id: string;
+  guestId: string;
+  userId: string;
+  createdAt: string;
+}
+
+export interface TermsAcceptancesTable {
+  id: string;
+  userId: string;
+  termsType: string;
+  termsVersion: string;
+  organizationId: string;
+  acceptedAt: string;
+  ipAddress: string;
+}
+
 export interface InvoiceLineItemsTable {
   id: string;
   invoiceId: string;
@@ -388,6 +423,9 @@ export interface AppDatabase {
   stream_providers: StreamProvidersTable;
   import_jobs: ImportJobsTable;
   auction_summaries: AuctionSummariesTable;
+  payment_methods: PaymentMethodsTable;
+  bidder_registrations: BidderRegistrationsTable;
+  terms_acceptances: TermsAcceptancesTable;
 }
 
 // ─── Type aliases ───────────────────────────────────────────────────
