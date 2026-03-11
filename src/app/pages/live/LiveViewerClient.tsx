@@ -5,7 +5,7 @@ import type { ServerMessage, AuctionStatus, LotStatus, ChatMessage } from "@/auc
 import { nanoid } from "nanoid";
 import { toast } from "sonner";
 import { formatCents, dollarsToCents } from "@/lib/money";
-import { setGuestName } from "./server-functions/guest";
+import { RegistrationPanel } from "./RegistrationPanel";
 
 // ─── Types ──────────────────────────────────────────────────────────
 
@@ -106,12 +106,8 @@ function ChatPanel({
   messages,
   guest,
   onSend,
-  showNamePrompt,
-  onNamePrompt,
-  nameValue,
-  onNameChange,
-  onNameSubmit,
-  nameSubmitting,
+  onRegistrationGate,
+  registrationComplete,
   currentLot,
   onBidTap,
   bidInputElement,
@@ -122,12 +118,8 @@ function ChatPanel({
   messages: ChatMessage[];
   guest: GuestInfo | null;
   onSend: (content: string) => void;
-  showNamePrompt: boolean;
-  onNamePrompt: () => void;
-  nameValue: string;
-  onNameChange: (value: string) => void;
-  onNameSubmit: () => void;
-  nameSubmitting: boolean;
+  onRegistrationGate: () => void;
+  registrationComplete: boolean;
   currentLot: CurrentLotData | null;
   onBidTap: () => void;
   bidInputElement?: React.ReactNode;
@@ -139,15 +131,6 @@ function ChatPanel({
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const autoScrollRef = useRef(true);
   const [hasNewMessages, setHasNewMessages] = useState(false);
-  const nameInputRef = useRef<HTMLInputElement | null>(null);
-
-  // Focus name input when prompt appears
-  useEffect(() => {
-    if (showNamePrompt) {
-      // RAF ensures the DOM has painted before focusing
-      requestAnimationFrame(() => nameInputRef.current?.focus());
-    }
-  }, [showNamePrompt]);
 
   // Scroll pin on mobile keyboard open
   useEffect(() => {
@@ -229,41 +212,6 @@ function ChatPanel({
         </button>
       )}
 
-      {showNamePrompt && (
-        <div className="absolute inset-x-0 bottom-0 z-20 p-3">
-          <div className="rounded-xl border border-zinc-700 bg-zinc-900 p-4 shadow-lg">
-            <h2 className="text-lg font-semibold text-white mb-3">
-              What&apos;s your name?
-            </h2>
-            <input
-              ref={nameInputRef}
-              type="text"
-              value={nameValue}
-              onChange={(e) => onNameChange(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey) {
-                  e.preventDefault();
-                  onNameSubmit();
-                }
-              }}
-              placeholder="Your first name"
-              maxLength={50}
-              autoFocus
-              disabled={nameSubmitting}
-              className="w-full h-12 px-4 rounded-lg border border-zinc-600 bg-zinc-800 text-lg text-white placeholder:text-zinc-500 focus:outline-none focus:ring-2 focus:ring-zinc-400 mb-3 disabled:opacity-50"
-            />
-            <button
-              type="button"
-              onClick={onNameSubmit}
-              disabled={!nameValue.trim() || nameSubmitting}
-              className="w-full h-12 rounded-lg bg-white text-black text-lg font-semibold cursor-pointer hover:bg-zinc-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {nameSubmitting ? "Joining…" : "Join Chat"}
-            </button>
-          </div>
-        </div>
-      )}
-
       {confirmingBidCents != null && onConfirmBid && onCancelConfirm && (
         <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/80">
           <div className="rounded-xl border border-zinc-700 bg-zinc-900 p-6 shadow-lg w-[calc(100%-2rem)] max-w-sm text-center">
@@ -291,7 +239,7 @@ function ChatPanel({
       )}
 
       {bidInputElement || (
-        <ChatInput guest={guest} onSend={onSend} onNamePrompt={onNamePrompt} currentLot={currentLot} onBidTap={onBidTap} />
+        <ChatInput guest={guest} onSend={onSend} onRegistrationGate={onRegistrationGate} registrationComplete={registrationComplete} currentLot={currentLot} onBidTap={onBidTap} />
       )}
     </div>
   );
@@ -300,22 +248,21 @@ function ChatPanel({
 // ─── Chat Input ──────────────────────────────────────────────────────
 
 function BidButton({
-  guest,
   currentLot,
-  onNamePrompt,
+  registrationComplete,
+  onRegistrationGate,
   onBidTap,
 }: {
-  guest: GuestInfo | null;
   currentLot: CurrentLotData | null;
-  onNamePrompt: () => void;
+  registrationComplete: boolean;
+  onRegistrationGate: () => void;
   onBidTap: () => void;
 }) {
-  const hasName = Boolean(guest?.name);
   const disabled = !currentLot;
 
   const handleClick = () => {
-    if (!hasName) {
-      onNamePrompt();
+    if (!registrationComplete) {
+      onRegistrationGate();
       return;
     }
     if (!disabled) {
@@ -327,7 +274,7 @@ function BidButton({
     <button
       type="button"
       onClick={handleClick}
-      disabled={hasName && disabled}
+      disabled={registrationComplete && disabled}
       title={disabled ? "No active item" : undefined}
       aria-label="Place bid"
       className="shrink-0 h-12 w-12 rounded-lg border border-zinc-600 bg-zinc-900 text-lg font-semibold text-white cursor-pointer hover:border-zinc-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
@@ -340,39 +287,40 @@ function BidButton({
 function ChatInput({
   guest,
   onSend,
-  onNamePrompt,
+  onRegistrationGate,
+  registrationComplete,
   currentLot,
   onBidTap,
 }: {
   guest: GuestInfo | null;
   onSend: (content: string) => void;
-  onNamePrompt: () => void;
+  onRegistrationGate: () => void;
+  registrationComplete: boolean;
   currentLot: CurrentLotData | null;
   onBidTap: () => void;
 }) {
   const [value, setValue] = useState("");
   const inputRef = useRef<HTMLInputElement | null>(null);
-  const hasName = Boolean(guest?.name);
 
   const handleSubmit = () => {
     const trimmed = value.trim();
-    if (!trimmed || !hasName) return;
+    if (!trimmed) return;
     onSend(trimmed);
     setValue("");
     inputRef.current?.focus();
   };
 
-  if (!hasName) {
+  if (!registrationComplete) {
     return (
       <div className="shrink-0 border-t border-zinc-700 p-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] flex gap-2">
         <button
           type="button"
-          onClick={onNamePrompt}
+          onClick={onRegistrationGate}
           className="flex-1 h-12 px-4 rounded-lg border border-zinc-600 bg-zinc-900 text-lg text-zinc-500 text-left cursor-pointer hover:border-zinc-500 transition-colors"
         >
-          Enter your name to chat
+          Tap to join chat
         </button>
-        <BidButton guest={guest} currentLot={currentLot} onNamePrompt={onNamePrompt} onBidTap={onBidTap} />
+        <BidButton currentLot={currentLot} registrationComplete={registrationComplete} onRegistrationGate={onRegistrationGate} onBidTap={onBidTap} />
       </div>
     );
   }
@@ -395,7 +343,7 @@ function ChatInput({
         maxLength={500}
         className="flex-1 min-w-0 h-12 px-4 rounded-lg border border-zinc-600 bg-zinc-900 text-lg text-white placeholder:text-zinc-500 focus:outline-none focus:ring-2 focus:ring-zinc-400"
       />
-      <BidButton guest={guest} currentLot={currentLot} onNamePrompt={onNamePrompt} onBidTap={onBidTap} />
+      <BidButton currentLot={currentLot} registrationComplete={registrationComplete} onRegistrationGate={onRegistrationGate} onBidTap={onBidTap} />
     </div>
   );
 }
@@ -730,31 +678,27 @@ export function LiveViewerClient({ auction, guest: initialGuest, bidderRequireme
     if (currentLot) setBidMode(true);
   }, [currentLot]);
 
-  const [showNamePrompt, setShowNamePrompt] = useState(false);
-  const [nameValue, setNameValue] = useState("");
-  const [nameSubmitting, setNameSubmitting] = useState(false);
+  const [showRegistration, setShowRegistration] = useState(false);
+  const [registrationComplete, setRegistrationComplete] = useState(() => {
+    if (!existingRegistration?.registered) return false;
+    return existingRegistration.hasCard || bidderRequirement !== "card_on_file";
+  });
 
-  const handleNamePrompt = useCallback(() => {
-    setShowNamePrompt(true);
-  }, []);
-
-  const handleNameSubmit = useCallback(async () => {
-    const trimmed = nameValue.trim();
-    if (!trimmed || nameSubmitting) return;
-
-    setNameSubmitting(true);
-    try {
-      const ok = await setGuestName(trimmed);
-      if (!ok) return;
-      setGuest((prev) => prev ? { ...prev, name: trimmed } : prev);
-      setShowNamePrompt(false);
-      setNameValue("");
-      // Force WS reconnect so new connection includes guest_name cookie
-      setWsReconnectTrigger((n) => n + 1);
-    } finally {
-      setNameSubmitting(false);
+  const handleRegistrationGate = useCallback(() => {
+    if (!registrationComplete) {
+      setShowRegistration(true);
     }
-  }, [nameValue, nameSubmitting]);
+  }, [registrationComplete]);
+
+  const handleRegistrationComplete = useCallback(async (reg: { userId?: string; name: string; hasCard: boolean }) => {
+    // For guest tier, setGuestName is already called inside RegistrationPanel's GuestTier
+    // For registered/card_on_file, the server functions handle user creation
+    setGuest((prev) => prev ? { ...prev, name: reg.name } : prev);
+    setRegistrationComplete(true);
+    setShowRegistration(false);
+    // Force WS reconnect so new connection includes updated cookies
+    setWsReconnectTrigger((n) => n + 1);
+  }, []);
 
   useEffect(() => {
     let wsReconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -932,12 +876,8 @@ export function LiveViewerClient({ auction, guest: initialGuest, bidderRequireme
         messages={chatMessages}
         guest={guest}
         onSend={sendChatMessage}
-        showNamePrompt={showNamePrompt}
-        onNamePrompt={handleNamePrompt}
-        nameValue={nameValue}
-        onNameChange={setNameValue}
-        onNameSubmit={handleNameSubmit}
-        nameSubmitting={nameSubmitting}
+        onRegistrationGate={handleRegistrationGate}
+        registrationComplete={registrationComplete}
         currentLot={currentLot}
         onBidTap={handleBidTap}
         bidInputElement={bidMode && currentLot ? (
@@ -952,6 +892,15 @@ export function LiveViewerClient({ auction, guest: initialGuest, bidderRequireme
         onConfirmBid={sendBid}
         onCancelConfirm={handleBidCancel}
       />
+
+      {showRegistration && guest && (
+        <RegistrationPanel
+          requirement={bidderRequirement as "guest" | "registered" | "card_on_file"}
+          onComplete={handleRegistrationComplete}
+          onCancel={() => setShowRegistration(false)}
+          guestId={guest.id}
+        />
+      )}
     </div>
   );
 }
