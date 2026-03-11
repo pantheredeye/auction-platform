@@ -39,6 +39,6 @@ export const setLiveCSP =
   ({ response, rw: { nonce } }) => {
     response.headers.set(
       "Content-Security-Policy",
-      `default-src 'self'; script-src 'self' 'unsafe-eval' 'nonce-${nonce}'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; connect-src 'self' wss:; media-src 'self' blob:; frame-ancestors 'self'; object-src 'none';`,
+      `default-src 'self'; script-src 'self' 'unsafe-eval' 'nonce-${nonce}' https://js.stripe.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; connect-src 'self' wss: https://api.stripe.com https://r.stripe.com; media-src 'self' blob:; frame-ancestors 'self'; frame-src 'self' https://js.stripe.com; object-src 'none';`,
     );
   };
