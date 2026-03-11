@@ -99,6 +99,26 @@ declare module "rwsdk/worker" {
 const app = defineApp([
   setCommonHeaders(),
 
+  // Apple Pay domain verification
+  // Get the real value from Stripe Dashboard → Settings → Payment Methods → Apple Pay
+  // after registering auction.digitalglue.dev and staging-auction.digitalglue.dev
+  async ({ request }) => {
+    const url = new URL(request.url);
+    if (
+      request.method === "GET" &&
+      url.pathname === "/.well-known/apple-developer-merchantid-domain-association"
+    ) {
+      return new Response(
+        // TODO: Replace with actual verification file content from Stripe
+        "APPLE_PAY_DOMAIN_VERIFICATION_PLACEHOLDER",
+        {
+          status: 200,
+          headers: { "Content-Type": "text/plain" },
+        },
+      );
+    }
+  },
+
   // Stripe webhook endpoint
   async ({ request }) => {
     const url = new URL(request.url);
