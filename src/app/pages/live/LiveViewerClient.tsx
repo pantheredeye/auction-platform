@@ -540,6 +540,9 @@ export function LiveViewerClient({ auction, guest: initialGuest, bidderRequireme
         toast.error(msg.reason);
         setConfirmingBidCents(null);
         break;
+      case "registration_required":
+        setShowRegistration(true);
+        break;
       case "pong":
         break;
     }
