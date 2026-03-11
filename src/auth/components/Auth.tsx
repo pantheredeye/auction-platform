@@ -66,12 +66,15 @@ export function Auth() {
     }
 
     try {
-      const { exists, authMethod } = await checkUsername(username);
+      const result = await checkUsername(username);
 
-      if (exists && authMethod) {
-        if (authMethod === "password") {
+      if (result.exists && result.authMethod) {
+        if (result.authMethod === "bidder") {
+          setResult({ type: "error", message: result.error! });
+          return;
+        } else if (result.authMethod === "password") {
           setState("PASSWORD_LOGIN");
-        } else if (authMethod === "passkey") {
+        } else if (result.authMethod === "passkey") {
           setState("PASSKEY_LOGIN");
         } else {
           setState("PASSKEY_LOGIN");

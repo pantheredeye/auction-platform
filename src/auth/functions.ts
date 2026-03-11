@@ -25,6 +25,15 @@ export async function checkUsername(username: string) {
     return { exists: false, authMethod: null };
   }
 
+  if (user.authMethod === "bidder") {
+    return {
+      exists: true,
+      authMethod: "bidder" as const,
+      error:
+        "This account was created for live bidding. Contact support to upgrade to a full account.",
+    };
+  }
+
   return {
     exists: true,
     authMethod: user.authMethod as "password" | "passkey" | "both",
@@ -84,6 +93,14 @@ export async function loginWithPassword(
 
   if (!user) {
     return { success: false, error: genericError };
+  }
+
+  if (user.authMethod === "bidder") {
+    return {
+      success: false,
+      error:
+        "This account was created for live bidding. Contact support to upgrade to a full account.",
+    };
   }
 
   if (user.authMethod !== "password" && user.authMethod !== "both") {
