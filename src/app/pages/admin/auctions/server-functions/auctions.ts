@@ -90,6 +90,7 @@ export async function createAuction(data: {
   buyerPremiumPct?: number;
   extensionSeconds?: number;
   auctioneerId?: string | null;
+  bidderRequirement?: string | null;
 }) {
   const { ctx } = requestInfo;
   const orgId = ctx.currentOrganization!.id;
@@ -118,6 +119,7 @@ export async function createAuction(data: {
       streamUrl: null,
       recording_key: null,
       recording_status: "none",
+      bidderRequirement: data.bidderRequirement ?? null,
       auctioneerId: data.auctioneerId ?? null,
       createdByUserId: userId,
       clonedFromAuctionId: null,
@@ -157,6 +159,7 @@ export async function updateAuction(
     buyerPremiumPct?: number;
     extensionSeconds?: number;
     auctioneerId?: string | null;
+    bidderRequirement?: string | null;
   },
   version: number,
 ) {
@@ -199,6 +202,8 @@ export async function updateAuction(
     updates.extensionSeconds = data.extensionSeconds;
   if (data.auctioneerId !== undefined)
     updates.auctioneerId = data.auctioneerId;
+  if (data.bidderRequirement !== undefined)
+    updates.bidderRequirement = data.bidderRequirement;
 
   const result = await db
     .updateTable("auctions")
