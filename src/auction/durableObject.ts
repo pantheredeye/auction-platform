@@ -267,11 +267,6 @@ export class AuctionRoomDO extends DurableObject<Cloudflare.Env> {
 
     // Periodic chat buffer flush
     await this.flushChatBuffer();
-
-    // Re-schedule 30s alarm if auction still active
-    if (this.state.status === "live") {
-      await this.scheduleChatFlushAlarm();
-    }
   }
 
   // ─── Hibernation handlers ──────────────────────────────────────
