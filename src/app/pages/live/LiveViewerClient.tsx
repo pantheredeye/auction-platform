@@ -171,7 +171,7 @@ function ChatPanel({
   }, []);
 
   return (
-    <div className="relative flex flex-col shrink-0 h-[40dvh] md:h-auto md:flex-1 bg-zinc-950 touch-manipulation">
+    <div className="relative flex flex-col flex-1 min-h-0 bg-zinc-950 touch-manipulation">
       <div
         ref={scrollRef}
         onScroll={handleScroll}
@@ -874,27 +874,45 @@ export function LiveViewerClient({ auction, guest: initialGuest, bidderRequireme
         </div>
       </div>
 
-      {/* Chat section: independently scrollable (40dvh mobile, 30% desktop) */}
-      <ChatPanel
-        messages={chatMessages}
-        guest={guest}
-        onSend={sendChatMessage}
-        onRegistrationGate={handleRegistrationGate}
-        registrationComplete={registrationComplete}
-        currentLot={currentLot}
-        onBidTap={handleBidTap}
-        bidInputElement={bidMode && currentLot ? (
-          <BidInput
-            currentLot={currentLot}
-            auction={auction}
-            onSubmit={handleBidSubmit}
-            onCancel={() => setBidMode(false)}
-          />
-        ) : undefined}
-        confirmingBidCents={confirmingBidCents}
-        onConfirmBid={sendBid}
-        onCancelConfirm={handleBidCancel}
-      />
+      {/* Chat column: banner + chat panel */}
+      <div className="flex flex-col shrink-0 h-[40dvh] md:h-auto md:flex-1">
+        {/* Pre-registration banner */}
+        {bidderRequirement !== "guest" && !registrationComplete && (
+          <div className="shrink-0 bg-zinc-800/90 border-b border-zinc-700 px-4 py-2 flex items-center justify-between gap-3">
+            <p className="text-sm text-zinc-300">
+              Register now to participate when bidding starts
+            </p>
+            <button
+              type="button"
+              onClick={() => setShowRegistration(true)}
+              className="shrink-0 h-10 min-w-[5rem] px-4 rounded-lg bg-white text-black text-sm font-semibold cursor-pointer hover:bg-zinc-200 transition-colors"
+            >
+              Register
+            </button>
+          </div>
+        )}
+
+        <ChatPanel
+          messages={chatMessages}
+          guest={guest}
+          onSend={sendChatMessage}
+          onRegistrationGate={handleRegistrationGate}
+          registrationComplete={registrationComplete}
+          currentLot={currentLot}
+          onBidTap={handleBidTap}
+          bidInputElement={bidMode && currentLot ? (
+            <BidInput
+              currentLot={currentLot}
+              auction={auction}
+              onSubmit={handleBidSubmit}
+              onCancel={() => setBidMode(false)}
+            />
+          ) : undefined}
+          confirmingBidCents={confirmingBidCents}
+          onConfirmBid={sendBid}
+          onCancelConfirm={handleBidCancel}
+        />
+      </div>
 
       {showRegistration && guest && (
         <RegistrationPanel
