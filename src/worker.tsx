@@ -7,6 +7,8 @@ import { setCommonHeaders, setLiveCSP } from "@/app/headers";
 import { sessions } from "@/session/store";
 import { db } from "@/db";
 import { getOrCreateGuestId } from "@/app/lib/guest";
+import { resolveRequirement } from "@/lib/bidder-requirement";
+import type { BidderRequirement } from "@/lib/bidder-requirement";
 import type { Session } from "@/session/durableObject";
 import type { User, Membership, Organization } from "@/db";
 
@@ -194,6 +196,9 @@ const app = defineApp([
       headers: new Headers(request.headers),
     });
 
+    // Determine bidder status
+    let bidderStatus: BidderRequirement = "guest";
+
     if (ctx.user) {
       const isAdmin =
         ctx.currentOrganization?.role === "super_admin" ||
@@ -202,11 +207,62 @@ const app = defineApp([
       doRequest.headers.set("X-User-Id", ctx.user.id);
       doRequest.headers.set("X-Username", ctx.user.displayName ?? ctx.user.name ?? ctx.user.username);
       doRequest.headers.set("X-Is-Admin", String(isAdmin));
+
+      // Check payment method for authenticated users
+      const paymentMethod = await db
+        .selectFrom("payment_methods")
+        .select("id")
+        .where("userId", "=", ctx.user.id)
+        .where("status", "=", "active")
+        .executeTakeFirst();
+      bidderStatus = paymentMethod ? "card_on_file" : "registered";
     } else {
       doRequest.headers.set("X-User-Id", ctx.guest!.id);
       doRequest.headers.set("X-Username", ctx.guest!.name || "Guest");
       doRequest.headers.set("X-Is-Admin", "false");
       doRequest.headers.set("X-Is-Guest", "true");
+
+      // Check bidder registration for guests
+      const registration = await db
+        .selectFrom("bidder_registrations")
+        .select(["userId"])
+        .where("guestId", "=", ctx.guest!.id)
+        .executeTakeFirst();
+
+      if (registration) {
+        const paymentMethod = await db
+          .selectFrom("payment_methods")
+          .select("id")
+          .where("userId", "=", registration.userId)
+          .where("status", "=", "active")
+          .executeTakeFirst();
+        bidderStatus = paymentMethod ? "card_on_file" : "registered";
+      }
+    }
+
+    doRequest.headers.set("X-Bidder-Status", bidderStatus);
+
+    // Determine effective bidder requirement
+    const auction = await db
+      .selectFrom("auctions")
+      .select(["bidderRequirement", "organizationId"])
+      .where("id", "=", auctionId)
+      .executeTakeFirst();
+
+    if (auction) {
+      const org = await db
+        .selectFrom("organizations")
+        .select("bidderRequirement")
+        .where("id", "=", auction.organizationId)
+        .executeTakeFirst();
+
+      const effectiveRequirement = resolveRequirement(
+        (org?.bidderRequirement ?? "guest") as BidderRequirement,
+        (auction.bidderRequirement as BidderRequirement) ?? null,
+      );
+      doRequest.headers.set("X-Bidder-Requirement", effectiveRequirement);
+    } else {
+      doRequest.headers.set("X-Bidder-Requirement", "guest");
     }
 
     return stub.fetch(doRequest);
