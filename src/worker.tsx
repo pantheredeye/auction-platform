@@ -35,6 +35,9 @@ import { AdminCategoriesPage } from "@/app/pages/admin/catalog/AdminCategoriesPa
 import { AdminProductFormPage } from "@/app/pages/admin/catalog/AdminProductFormPage";
 import { AdminImportPage } from "@/app/pages/admin/catalog/AdminImportPage";
 
+// Admin settings page
+import { AdminSettingsPage } from "@/app/pages/admin/settings/AdminSettingsPage";
+
 // Admin auction pages
 import { AdminAuctionsPage } from "@/app/pages/admin/auctions/AdminAuctionsPage";
 import { AdminAuctionFormPage } from "@/app/pages/admin/auctions/AdminAuctionFormPage";
@@ -536,6 +539,7 @@ const app = defineApp([
         route("/auctions/:id/lots", [requireEmployee, AdminLotsPage]),
         route("/auctions/:id/auctioneer", [requireEmployee, AuctioneerPage]),
         route("/auctions/:id/recording", [requireEmployee, RecordingPage]),
+        route("/settings", [requireAdmin, AdminSettingsPage]),
       ]),
     ),
     ...prefix(
