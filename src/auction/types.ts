@@ -1,3 +1,5 @@
+import type { BidderRequirement } from "@/lib/bidder-requirement";
+
 // ─── Enums as string unions ─────────────────────────────────────────
 
 export type AuctionStatus =
@@ -87,6 +89,7 @@ export interface AuctionRoomState {
   connectedUsers: Set<string>;
   defaultIncrementCents: number;
   incrementRules: IncrementRule[];
+  bidderRequirement: BidderRequirement;
 }
 
 export interface BufferedBidEvent {
@@ -148,7 +151,8 @@ export type ServerMessage =
   | { type: "pong" }
   | { type: "chat_history"; messages: ChatMessage[] }
   | { type: "stream_ended" }
-  | { type: "error"; message: string };
+  | { type: "error"; message: string }
+  | { type: "registration_required"; requirement: string };
 
 export type AdminMessage =
   | { type: "advance_lot" }

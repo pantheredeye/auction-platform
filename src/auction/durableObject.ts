@@ -15,6 +15,8 @@ import type {
 } from "./types";
 import { resolveIncrement, validateBidAmount } from "./increments";
 import { canTransitionLot, canTransitionAuction } from "./state-machine";
+import type { BidderRequirement } from "@/lib/bidder-requirement";
+import { meetsRequirement } from "@/lib/bidder-requirement";
 
 const ADMIN_MESSAGE_TYPES = new Set([
   "advance_lot", "going_once", "going_twice", "sold",
@@ -29,6 +31,7 @@ export interface SocketAttachment {
   username: string;
   isAdmin: boolean;
   isGuest: boolean;
+  bidderStatus: BidderRequirement;
 }
 
 // ─── Serializable state for ctx.storage ─────────────────────────────
@@ -41,6 +44,7 @@ interface StoredState {
   currentLotId: string | null;
   defaultIncrementCents: number;
   incrementRules: IncrementRule[];
+  bidderRequirement: BidderRequirement;
 }
 
 // ─── Durable Object ─────────────────────────────────────────────────
@@ -155,6 +159,7 @@ export class AuctionRoomDO extends DurableObject<Cloudflare.Env> {
       connectedUsers: new Set(),
       defaultIncrementCents: auction.defaultIncrementCents,
       incrementRules,
+      bidderRequirement: "guest" as BidderRequirement,
     };
 
     await this.persistState();
@@ -173,7 +178,7 @@ export class AuctionRoomDO extends DurableObject<Cloudflare.Env> {
 
   // ─── WebSocket upgrade ──────────────────────────────────────────
 
-  private handleWebSocketUpgrade(request: Request): Response {
+  private async handleWebSocketUpgrade(request: Request): Promise<Response> {
     const pair = new WebSocketPair();
     const [client, server] = Object.values(pair);
 
@@ -181,6 +186,14 @@ export class AuctionRoomDO extends DurableObject<Cloudflare.Env> {
     const username = request.headers.get("X-Username") ?? "Anonymous";
     const isAdmin = request.headers.get("X-Is-Admin") === "true";
     const isGuest = request.headers.get("X-Is-Guest") === "true";
+    const bidderStatus = (request.headers.get("X-Bidder-Status") ?? "guest") as BidderRequirement;
+
+    // Set bidderRequirement from header on first connection (if not already set)
+    const bidderRequirement = request.headers.get("X-Bidder-Requirement") as BidderRequirement | null;
+    if (bidderRequirement && !this.state.bidderRequirement) {
+      this.state.bidderRequirement = bidderRequirement;
+      await this.persistState();
+    }
 
     const tags = [userId];
     if (isAdmin) tags.push("admin");
@@ -191,6 +204,7 @@ export class AuctionRoomDO extends DurableObject<Cloudflare.Env> {
       username,
       isAdmin,
       isGuest,
+      bidderStatus,
     } satisfies SocketAttachment);
 
     this.state.connectedUsers.add(userId);
@@ -312,12 +326,29 @@ export class AuctionRoomDO extends DurableObject<Cloudflare.Env> {
     }
   }
 
+  // ─── Bidder requirement gating ─────────────────────────────────
+
+  private checkBidderRequirement(ws: WebSocket): boolean {
+    const attachment = ws.deserializeAttachment() as SocketAttachment | null;
+    if (!attachment) return false;
+    if (!meetsRequirement(attachment.bidderStatus, this.state.bidderRequirement)) {
+      this.sendToSocket(ws, {
+        type: "registration_required",
+        requirement: this.state.bidderRequirement,
+      });
+      return false;
+    }
+    return true;
+  }
+
   // ─── Bid handling ─────────────────────────────────────────────
 
   private async handleBid(
     ws: WebSocket,
     msg: { type: "bid"; lotId: string; amountCents: number; idempotencyKey: string },
   ) {
+    if (!this.checkBidderRequirement(ws)) return;
+
     const attachment = ws.deserializeAttachment() as SocketAttachment | null;
     if (!attachment) {
       this.sendToSocket(ws, { type: "error", message: "No attachment" });
@@ -453,6 +484,8 @@ export class AuctionRoomDO extends DurableObject<Cloudflare.Env> {
     ws: WebSocket,
     msg: { type: "claim"; lotId: string; quantity: number; idempotencyKey: string },
   ) {
+    if (!this.checkBidderRequirement(ws)) return;
+
     const attachment = ws.deserializeAttachment() as SocketAttachment | null;
     if (!attachment) {
       this.sendToSocket(ws, { type: "error", message: "No attachment" });
@@ -565,6 +598,8 @@ export class AuctionRoomDO extends DurableObject<Cloudflare.Env> {
   // ─── Chat handling ──────────────────────────────────────────────
 
   private async handleChat(ws: WebSocket, msg: { type: "chat"; content: string }) {
+    if (!this.checkBidderRequirement(ws)) return;
+
     const attachment = ws.deserializeAttachment() as SocketAttachment | null;
     if (!attachment) {
       this.sendToSocket(ws, { type: "error", message: "No attachment" });
@@ -1260,6 +1295,7 @@ export class AuctionRoomDO extends DurableObject<Cloudflare.Env> {
       currentLotId: this.state.currentLotId,
       defaultIncrementCents: this.state.defaultIncrementCents,
       incrementRules: this.state.incrementRules,
+      bidderRequirement: this.state.bidderRequirement,
     };
     await this.ctx.storage.put("state", stored);
   }
@@ -1287,6 +1323,7 @@ export class AuctionRoomDO extends DurableObject<Cloudflare.Env> {
         ),
         defaultIncrementCents: stored.defaultIncrementCents,
         incrementRules: stored.incrementRules,
+        bidderRequirement: stored.bidderRequirement ?? "guest",
       };
     }
   }
@@ -1305,5 +1342,6 @@ function emptyState(): AuctionRoomState {
     connectedUsers: new Set(),
     defaultIncrementCents: 100,
     incrementRules: [],
+    bidderRequirement: "guest",
   };
 }
