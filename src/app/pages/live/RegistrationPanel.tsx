@@ -1,11 +1,22 @@
 "use client";
 
-import { useState, useCallback, useEffect, type FormEvent } from "react";
+import { useState, useCallback, useEffect, useRef, type FormEvent } from "react";
 import { Button } from "@/app/components/ui/button";
 import { Input } from "@/app/components/ui/input";
 import { cn } from "@/app/lib/utils";
 import { setGuestName } from "./server-functions/guest";
-import { createBidder } from "@/stripe/server-functions/setup";
+import {
+  createBidder,
+  createBidderAndSetupIntent,
+  savePaymentMethod,
+} from "@/stripe/server-functions/setup";
+import { loadStripe, type Stripe } from "@stripe/stripe-js";
+import {
+  Elements,
+  PaymentElement,
+  useStripe,
+  useElements,
+} from "@stripe/react-stripe-js";
 
 interface RegistrationResult {
   userId?: string;
@@ -76,6 +87,9 @@ export function RegistrationPanel({
         )}
         {requirement === "registered" && (
           <RegisteredTier guestId={guestId} onComplete={onComplete} />
+        )}
+        {requirement === "card_on_file" && (
+          <CardOnFileTier guestId={guestId} onComplete={onComplete} />
         )}
       </div>
     </div>
@@ -205,6 +219,273 @@ function RegisteredTier({
           "Register"
         )}
       </Button>
+    </form>
+  );
+}
+
+// Cache stripePromise per publishable key
+let stripePromiseCache: { key: string; promise: Promise<Stripe | null> } | null = null;
+function getStripePromise(publishableKey: string) {
+  if (!stripePromiseCache || stripePromiseCache.key !== publishableKey) {
+    stripePromiseCache = { key: publishableKey, promise: loadStripe(publishableKey) };
+  }
+  return stripePromiseCache.promise;
+}
+
+function CardOnFileTier({
+  guestId,
+  onComplete,
+}: {
+  guestId: string;
+  onComplete: (reg: RegistrationResult) => void;
+}) {
+  const [step, setStep] = useState<"info" | "card">("info");
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [nameError, setNameError] = useState<string | null>(null);
+  const [emailError, setEmailError] = useState<string | null>(null);
+  const [serverError, setServerError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [stripeData, setStripeData] = useState<{
+    userId: string;
+    clientSecret: string;
+    publishableKey: string;
+  } | null>(null);
+
+  const handleInfoSubmit = useCallback(
+    async (e: FormEvent) => {
+      e.preventDefault();
+
+      const trimmedName = name.trim();
+      const trimmedEmail = email.trim();
+      let hasError = false;
+
+      if (!trimmedName) {
+        setNameError("Name is required");
+        hasError = true;
+      } else {
+        setNameError(null);
+      }
+
+      const atIndex = trimmedEmail.indexOf("@");
+      if (!trimmedEmail || atIndex < 1 || trimmedEmail.indexOf(".", atIndex) === -1) {
+        setEmailError("Valid email is required");
+        hasError = true;
+      } else {
+        setEmailError(null);
+      }
+
+      if (hasError) return;
+
+      setServerError(null);
+      setSubmitting(true);
+
+      try {
+        const result = await createBidderAndSetupIntent({
+          name: trimmedName,
+          email: trimmedEmail,
+          guestId,
+        });
+        setStripeData(result);
+        setStep("card");
+      } catch {
+        setServerError("Something went wrong. Please try again.");
+      } finally {
+        setSubmitting(false);
+      }
+    },
+    [name, email, guestId]
+  );
+
+  if (step === "card" && stripeData) {
+    return (
+      <Elements
+        stripe={getStripePromise(stripeData.publishableKey)}
+        options={{ clientSecret: stripeData.clientSecret }}
+      >
+        <CardStep
+          userId={stripeData.userId}
+          name={name.trim()}
+          onComplete={onComplete}
+          onBack={() => setStep("info")}
+        />
+      </Elements>
+    );
+  }
+
+  return (
+    <form onSubmit={handleInfoSubmit} className="space-y-4">
+      <h2 className="text-xl font-semibold text-white">
+        Register to participate
+      </h2>
+
+      <div className="space-y-2">
+        <Input
+          type="text"
+          placeholder="Your name"
+          value={name}
+          onChange={(e) => {
+            setName(e.target.value);
+            if (nameError) setNameError(null);
+          }}
+          className="h-12 bg-zinc-800 text-lg text-white placeholder:text-zinc-500 border-zinc-700"
+          autoFocus
+          aria-invalid={!!nameError}
+          aria-describedby={nameError ? "cof-name-error" : undefined}
+        />
+        {nameError && (
+          <p id="cof-name-error" className="text-sm font-medium text-red-400">
+            {nameError}
+          </p>
+        )}
+      </div>
+
+      <div className="space-y-2">
+        <Input
+          type="email"
+          placeholder="Email address"
+          value={email}
+          onChange={(e) => {
+            setEmail(e.target.value);
+            if (emailError) setEmailError(null);
+          }}
+          className="h-12 bg-zinc-800 text-lg text-white placeholder:text-zinc-500 border-zinc-700"
+          aria-invalid={!!emailError}
+          aria-describedby={emailError ? "cof-email-error" : undefined}
+        />
+        {emailError && (
+          <p id="cof-email-error" className="text-sm font-medium text-red-400">
+            {emailError}
+          </p>
+        )}
+      </div>
+
+      {serverError && (
+        <p className="text-sm font-medium text-red-400">{serverError}</p>
+      )}
+
+      <Button
+        type="submit"
+        disabled={submitting}
+        className="h-12 w-full text-lg font-semibold"
+      >
+        {submitting ? (
+          <span className="flex items-center gap-2">
+            <span className="size-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+            Setting up…
+          </span>
+        ) : (
+          "Continue"
+        )}
+      </Button>
+    </form>
+  );
+}
+
+function CardStep({
+  userId,
+  name,
+  onComplete,
+  onBack,
+}: {
+  userId: string;
+  name: string;
+  onComplete: (reg: RegistrationResult) => void;
+  onBack: () => void;
+}) {
+  const stripe = useStripe();
+  const elements = useElements();
+  const [error, setError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [ready, setReady] = useState(false);
+
+  const handleSubmit = useCallback(
+    async (e: FormEvent) => {
+      e.preventDefault();
+      if (!stripe || !elements) return;
+
+      setError(null);
+      setSubmitting(true);
+
+      try {
+        const result = await stripe.confirmSetup({
+          elements,
+          confirmParams: {
+            return_url: window.location.href,
+          },
+          redirect: "if_required",
+        });
+
+        if (result.error) {
+          setError(result.error.message ?? "Card could not be saved. Please try again.");
+          return;
+        }
+
+        const paymentMethodId =
+          typeof result.setupIntent.payment_method === "string"
+            ? result.setupIntent.payment_method
+            : result.setupIntent.payment_method?.id;
+
+        if (!paymentMethodId) {
+          setError("Could not retrieve payment method. Please try again.");
+          return;
+        }
+
+        await savePaymentMethod({ userId, stripePaymentMethodId: paymentMethodId });
+        onComplete({ userId, name, hasCard: true });
+      } catch {
+        setError("Something went wrong. Please try again.");
+      } finally {
+        setSubmitting(false);
+      }
+    },
+    [stripe, elements, userId, name, onComplete]
+  );
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-4">
+      <h2 className="text-xl font-semibold text-white">Add payment method</h2>
+
+      <div className="min-h-[200px]">
+        <PaymentElement
+          onReady={() => setReady(true)}
+          options={{
+            layout: "tabs",
+          }}
+        />
+        {!ready && (
+          <div className="flex items-center justify-center py-8">
+            <span className="size-6 animate-spin rounded-full border-2 border-white border-t-transparent" />
+          </div>
+        )}
+      </div>
+
+      {error && (
+        <p className="text-sm font-medium text-red-400">{error}</p>
+      )}
+
+      <Button
+        type="submit"
+        disabled={submitting || !ready}
+        className="h-12 w-full text-lg font-semibold"
+      >
+        {submitting ? (
+          <span className="flex items-center gap-2">
+            <span className="size-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+            Saving…
+          </span>
+        ) : (
+          "Save Card"
+        )}
+      </Button>
+
+      <button
+        type="button"
+        onClick={onBack}
+        className="w-full text-center text-sm text-zinc-400 hover:text-white"
+      >
+        Back
+      </button>
     </form>
   );
 }
