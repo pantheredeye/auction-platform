@@ -316,15 +316,18 @@ export function AdminAuctionFormClient({
 
             <div>
               <Label>Bidder Requirement</Label>
+              <p className="text-xs text-muted-foreground mb-1">
+                Override the org default for this auction, or leave as default.
+              </p>
               <Select value={bidderRequirement} onValueChange={setBidderRequirement}>
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="org_default">Org Default</SelectItem>
-                  <SelectItem value="guest">Guest</SelectItem>
-                  <SelectItem value="registered">Registered</SelectItem>
-                  <SelectItem value="card_on_file">Card on File</SelectItem>
+                  <SelectItem value="guest">Guest — display name only</SelectItem>
+                  <SelectItem value="registered">Registered — name + email</SelectItem>
+                  <SelectItem value="card_on_file">Card on File — payment card required</SelectItem>
                 </SelectContent>
               </Select>
             </div>
