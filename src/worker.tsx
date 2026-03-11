@@ -8,6 +8,7 @@ import { sessions } from "@/session/store";
 import { db } from "@/db";
 import { getOrCreateGuestId } from "@/app/lib/guest";
 import { resolveRequirement } from "@/lib/bidder-requirement";
+import { handleStripeWebhook } from "@/stripe/webhook";
 import type { BidderRequirement } from "@/lib/bidder-requirement";
 import type { Session } from "@/session/durableObject";
 import type { User, Membership, Organization } from "@/db";
@@ -97,6 +98,14 @@ declare module "rwsdk/worker" {
 
 const app = defineApp([
   setCommonHeaders(),
+
+  // Stripe webhook endpoint
+  async ({ request }) => {
+    const url = new URL(request.url);
+    if (request.method === "POST" && url.pathname === "/api/stripe/webhook") {
+      return handleStripeWebhook(request);
+    }
+  },
 
   // Serve R2 images at /images/*
   async ({ request }) => {
