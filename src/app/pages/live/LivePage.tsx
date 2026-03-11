@@ -1,5 +1,6 @@
 import type { RequestInfo } from "rwsdk/worker";
-import { getAuctionBySlug } from "./server-functions/live";
+import { getAuctionBySlug, getGuestRegistrationStatus } from "./server-functions/live";
+import { resolveRequirement, type BidderRequirement } from "@/lib/bidder-requirement";
 import { LiveViewerClient } from "./LiveViewerClient";
 
 export async function LivePage({ ctx, params }: RequestInfo) {
@@ -50,6 +51,20 @@ export async function LivePage({ ctx, params }: RequestInfo) {
   }
 
   const guest = ctx.guest;
+  const existingRegistration = guest
+    ? await getGuestRegistrationStatus(guest.id)
+    : null;
+  const bidderRequirement = resolveRequirement(
+    auction.orgBidderRequirement as BidderRequirement,
+    (auction.auctionBidderRequirement as BidderRequirement) ?? null,
+  );
 
-  return <LiveViewerClient auction={auction} guest={guest} />;
+  return (
+    <LiveViewerClient
+      auction={auction}
+      guest={guest}
+      bidderRequirement={bidderRequirement}
+      existingRegistration={existingRegistration}
+    />
+  );
 }

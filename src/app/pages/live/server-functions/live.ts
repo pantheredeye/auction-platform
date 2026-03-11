@@ -5,22 +5,25 @@ import { db } from "@/db";
 export async function getAuctionBySlug(slug: string) {
   const auction = await db
     .selectFrom("auctions")
+    .innerJoin("organizations", "organizations.id", "auctions.organizationId")
     .select([
-      "id",
-      "title",
-      "slug",
-      "status",
-      "type",
-      "scheduledStartAt",
-      "actualStartAt",
-      "actualEndAt",
-      "streamUrl",
-      "defaultIncrementCents",
-      "buyerPremiumPct",
-      "extensionSeconds",
-      "organizationId",
+      "auctions.id",
+      "auctions.title",
+      "auctions.slug",
+      "auctions.status",
+      "auctions.type",
+      "auctions.scheduledStartAt",
+      "auctions.actualStartAt",
+      "auctions.actualEndAt",
+      "auctions.streamUrl",
+      "auctions.defaultIncrementCents",
+      "auctions.buyerPremiumPct",
+      "auctions.extensionSeconds",
+      "auctions.organizationId",
+      "organizations.bidderRequirement as orgBidderRequirement",
+      "auctions.bidderRequirement as auctionBidderRequirement",
     ])
-    .where("slug", "=", slug)
+    .where("auctions.slug", "=", slug)
     .executeTakeFirst();
 
   if (!auction) return null;
@@ -49,5 +52,38 @@ export async function getAuctionBySlug(slug: string) {
   return {
     ...auction,
     activeLot: activeLot ?? null,
+  };
+}
+
+export async function getGuestRegistrationStatus(guestId: string) {
+  const registration = await db
+    .selectFrom("bidder_registrations")
+    .select(["userId"])
+    .where("guestId", "=", guestId)
+    .executeTakeFirst();
+
+  if (!registration) {
+    return { registered: false, hasCard: false } as const;
+  }
+
+  const user = await db
+    .selectFrom("users")
+    .select(["displayName", "username"])
+    .where("id", "=", registration.userId)
+    .executeTakeFirst();
+
+  const activeMethod = await db
+    .selectFrom("payment_methods")
+    .select(["id"])
+    .where("userId", "=", registration.userId)
+    .where("status", "=", "active")
+    .executeTakeFirst();
+
+  return {
+    registered: true,
+    hasCard: !!activeMethod,
+    userId: registration.userId,
+    userName: user?.displayName ?? null,
+    userEmail: user?.username ?? null,
   };
 }

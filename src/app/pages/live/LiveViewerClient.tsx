@@ -56,9 +56,19 @@ export interface GuestInfo {
   name: string | null;
 }
 
+export interface ExistingRegistration {
+  registered: boolean;
+  hasCard: boolean;
+  userId?: string;
+  userName?: string | null;
+  userEmail?: string | null;
+}
+
 interface LiveViewerClientProps {
   auction: LiveAuctionData;
   guest: GuestInfo | null;
+  bidderRequirement: string;
+  existingRegistration: ExistingRegistration | null;
 }
 
 // ─── Component ──────────────────────────────────────────────────────
@@ -139,6 +149,19 @@ function ChatPanel({
     }
   }, [showNamePrompt]);
 
+  // Scroll pin on mobile keyboard open
+  useEffect(() => {
+    const vv = window.visualViewport;
+    if (!vv) return;
+    const onResize = () => {
+      if (autoScrollRef.current) {
+        bottomRef.current?.scrollIntoView({ behavior: "instant" });
+      }
+    };
+    vv.addEventListener("resize", onResize);
+    return () => vv.removeEventListener("resize", onResize);
+  }, []);
+
   // Detect manual scroll-up to pause auto-scroll
   const handleScroll = useCallback(() => {
     const el = scrollRef.current;
@@ -165,11 +188,12 @@ function ChatPanel({
   }, []);
 
   return (
-    <div className="relative flex flex-col shrink-0 h-[40dvh] md:h-auto md:flex-1 bg-zinc-950">
+    <div className="relative flex flex-col shrink-0 h-[40dvh] md:h-auto md:flex-1 bg-zinc-950 touch-manipulation">
       <div
         ref={scrollRef}
         onScroll={handleScroll}
-        className="flex-1 overflow-y-auto p-3 space-y-2"
+        className="flex-1 overflow-y-auto p-3 space-y-2 overscroll-contain [scrollbar-gutter:stable] [will-change:scroll-position]"
+        aria-live="polite"
       >
         {messages.length === 0 && (
           <p className="text-lg text-zinc-500 font-medium text-center py-8">
@@ -327,6 +351,7 @@ function ChatInput({
   onBidTap: () => void;
 }) {
   const [value, setValue] = useState("");
+  const inputRef = useRef<HTMLInputElement | null>(null);
   const hasName = Boolean(guest?.name);
 
   const handleSubmit = () => {
@@ -334,11 +359,12 @@ function ChatInput({
     if (!trimmed || !hasName) return;
     onSend(trimmed);
     setValue("");
+    inputRef.current?.focus();
   };
 
   if (!hasName) {
     return (
-      <div className="shrink-0 border-t border-zinc-700 p-2 flex gap-2">
+      <div className="shrink-0 border-t border-zinc-700 p-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] flex gap-2">
         <button
           type="button"
           onClick={onNamePrompt}
@@ -352,8 +378,9 @@ function ChatInput({
   }
 
   return (
-    <div className="shrink-0 border-t border-zinc-700 p-2 flex gap-2">
+    <div className="shrink-0 border-t border-zinc-700 p-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] flex gap-2">
       <input
+        ref={inputRef}
         type="text"
         value={value}
         onChange={(e) => setValue(e.target.value)}
@@ -363,6 +390,7 @@ function ChatInput({
             handleSubmit();
           }
         }}
+        enterKeyHint="send"
         placeholder="Type a message…"
         maxLength={500}
         className="flex-1 min-w-0 h-12 px-4 rounded-lg border border-zinc-600 bg-zinc-900 text-lg text-white placeholder:text-zinc-500 focus:outline-none focus:ring-2 focus:ring-zinc-400"
@@ -461,7 +489,7 @@ function BidInput({
   );
 }
 
-export function LiveViewerClient({ auction, guest: initialGuest }: LiveViewerClientProps) {
+export function LiveViewerClient({ auction, guest: initialGuest, bidderRequirement, existingRegistration }: LiveViewerClientProps) {
   const [streamStatus, setStreamStatus] = useState<StreamStatus>("connecting");
   const [muted, setMuted] = useState(true);
   const [viewerCount, setViewerCount] = useState(0);
@@ -556,6 +584,7 @@ export function LiveViewerClient({ auction, guest: initialGuest }: LiveViewerCli
         break;
       case "bid_accepted":
         toast.success(`Your bid of ${formatCents(msg.amountCents)} was placed!`);
+        navigator.vibrate?.(10);
         setBidMode(false);
         setConfirmingBidCents(null);
         break;
