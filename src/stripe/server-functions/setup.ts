@@ -134,3 +134,80 @@ export async function createBidderAndSetupIntent({
     publishableKey: env.STRIPE_PUBLISHABLE_KEY,
   };
 }
+
+export async function savePaymentMethod({
+  userId,
+  stripePaymentMethodId,
+}: {
+  userId: string;
+  stripePaymentMethodId: string;
+}): Promise<{ success: true }> {
+  if (!userId?.trim()) throw new Error("userId is required");
+  if (!stripePaymentMethodId?.trim())
+    throw new Error("stripePaymentMethodId is required");
+
+  const stripe = getStripe(env.STRIPE_SECRET_KEY);
+  const pm = await stripe.paymentMethods.retrieve(stripePaymentMethodId);
+  const card = pm.card;
+  if (!card) throw new Error("Payment method has no card details");
+
+  const now = new Date().toISOString();
+
+  await db
+    .insertInto("payment_methods")
+    .values({
+      id: crypto.randomUUID(),
+      userId,
+      stripePaymentMethodId,
+      last4: card.last4,
+      brand: card.brand,
+      expMonth: card.exp_month,
+      expYear: card.exp_year,
+      isDefault: 1,
+      status: "active",
+      createdAt: now,
+      updatedAt: now,
+    })
+    .execute();
+
+  return { success: true };
+}
+
+export async function getBidderStatus(guestId: string): Promise<{
+  registered: boolean;
+  hasCard: boolean;
+  userId?: string;
+  userName?: string;
+  userEmail?: string;
+}> {
+  if (!guestId?.trim()) return { registered: false, hasCard: false };
+
+  const registration = await db
+    .selectFrom("bidder_registrations")
+    .selectAll()
+    .where("guestId", "=", guestId)
+    .executeTakeFirst();
+
+  if (!registration) return { registered: false, hasCard: false };
+
+  const user = await db
+    .selectFrom("users")
+    .select(["displayName", "username"])
+    .where("id", "=", registration.userId)
+    .executeTakeFirst();
+
+  const activeMethod = await db
+    .selectFrom("payment_methods")
+    .selectAll()
+    .where("userId", "=", registration.userId)
+    .where("status", "=", "active")
+    .executeTakeFirst();
+
+  return {
+    registered: true,
+    hasCard: !!activeMethod,
+    userId: registration.userId,
+    userName: user?.displayName ?? undefined,
+    userEmail: user?.username ?? undefined,
+  };
+}
