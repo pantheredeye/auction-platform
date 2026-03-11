@@ -1,5 +1,7 @@
 "use server";
+import { env } from "cloudflare:workers";
 import { db } from "@/db";
+import { getStripe } from "@/stripe/client";
 
 export async function createBidder({
   name,
@@ -71,4 +73,64 @@ export async function createBidder({
     .execute();
 
   return { userId, userName: trimmedName };
+}
+
+export async function createBidderAndSetupIntent({
+  name,
+  email,
+  guestId,
+}: {
+  name: string;
+  email: string;
+  guestId: string;
+}): Promise<{
+  userId: string;
+  clientSecret: string;
+  publishableKey: string;
+}> {
+  // Reuse createBidder for user + bidder_registration creation
+  const { userId } = await createBidder({ name, email, guestId });
+
+  const stripe = getStripe(env.STRIPE_SECRET_KEY);
+  const normalizedEmail = email.toLowerCase().trim();
+  const trimmedName = name.trim();
+
+  // Check if user already has a Stripe Customer
+  const user = await db
+    .selectFrom("users")
+    .select(["stripeCustomerId"])
+    .where("id", "=", userId)
+    .executeTakeFirstOrThrow();
+
+  let customerId = user.stripeCustomerId;
+
+  if (!customerId) {
+    // Create new Stripe Customer
+    const customer = await stripe.customers.create({
+      email: normalizedEmail,
+      name: trimmedName,
+      metadata: { userId, guestId },
+    });
+    customerId = customer.id;
+
+    // Store stripeCustomerId on user
+    await db
+      .updateTable("users")
+      .set({ stripeCustomerId: customerId })
+      .where("id", "=", userId)
+      .execute();
+  }
+
+  // Create SetupIntent for future off-session payments
+  const setupIntent = await stripe.setupIntents.create({
+    customer: customerId,
+    usage: "off_session",
+    automatic_payment_methods: { enabled: true },
+  });
+
+  return {
+    userId,
+    clientSecret: setupIntent.client_secret!,
+    publishableKey: env.STRIPE_PUBLISHABLE_KEY,
+  };
 }
