@@ -28,7 +28,7 @@ import type {
 } from "@/auction/types";
 import { formatCents } from "@/lib/money";
 import { imageUrl } from "@/lib/image-url";
-import { transitionAuctionStatus } from "./server-functions/auctions";
+import { transitionAuctionStatus, updateRecordingStatus } from "./server-functions/auctions";
 import { Volume2, VolumeX, ChevronDown, ChevronUp, MessageSquare, List, Share2, Loader2 } from "lucide-react";
 import { startRecording, type RecordingHandle } from "@/lib/stream/recording";
 
@@ -296,6 +296,7 @@ export function AuctioneerConsole({ auction, initialLots }: AuctioneerConsolePro
       const handle = startRecording(mediaStreamRef.current, auction.id);
       recordingRef.current = handle;
       setIsRecording(true);
+      updateRecordingStatus(auction.id, "recording").catch(console.error);
     } catch (err) {
       console.error("Recording start failed:", err);
       // Non-fatal: stream still works without recording
@@ -380,6 +381,7 @@ export function AuctioneerConsole({ auction, initialLots }: AuctioneerConsolePro
         recordingRef.current.stop().catch(() => {});
         recordingRef.current = null;
         setIsRecording(false);
+        updateRecordingStatus(auction.id, "failed").catch(() => {});
       }
       if (pcRef.current) {
         pcRef.current.close();
@@ -409,6 +411,7 @@ export function AuctioneerConsole({ auction, initialLots }: AuctioneerConsolePro
       // 3. Finalize recording (waits for all chunk uploads)
       const result = await stopRecordingForStream();
       setRecordingResult(result);
+      updateRecordingStatus(auction.id, result.success ? "ready" : "failed").catch(console.error);
 
       // 4. Release camera/mic tracks (turns off LED)
       if (mediaStreamRef.current) {
