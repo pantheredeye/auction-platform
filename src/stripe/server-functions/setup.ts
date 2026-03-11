@@ -20,6 +20,19 @@ export async function createBidder({
   const trimmedName = name.trim();
   const now = new Date().toISOString();
 
+  // Rate limit: max 3 registrations per guestId per hour
+  const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+  const { count } = await db
+    .selectFrom("bidder_registrations")
+    .select(db.fn.countAll().as("count"))
+    .where("guestId", "=", guestId)
+    .where("createdAt", ">", oneHourAgo)
+    .executeTakeFirstOrThrow();
+
+  if (Number(count) >= 3) {
+    throw new Error("Too many registration attempts. Please try again later.");
+  }
+
   // Check for existing user by username (email)
   const existingUser = await db
     .selectFrom("users")
@@ -61,7 +74,7 @@ export async function createBidder({
       .execute();
   }
 
-  // Create bidder_registration linking guestId to userId
+  // Create bidder_registration — handle duplicate (guestId, userId) gracefully
   await db
     .insertInto("bidder_registrations")
     .values({
@@ -70,6 +83,7 @@ export async function createBidder({
       userId,
       createdAt: now,
     })
+    .onConflict((oc) => oc.columns(["guestId", "userId"]).doNothing())
     .execute();
 
   return { userId, userName: trimmedName };
