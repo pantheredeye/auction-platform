@@ -1,0 +1,11 @@
+{
+  "name": "M&M Auctions",
+  "short_name": "M&M Auctions",
+  "start_url": "/live",
+  "display": "standalone",
+  "background_color": "#09090b",
+  "theme_color": "#1a1a2e",
+  "icons": [
+    { "src": "/favicon-light.svg", "type": "image/svg+xml", "sizes": "any" }
+  ]
+}

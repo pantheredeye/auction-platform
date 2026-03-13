@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useState, useEffect, useTransition } from "react";
 import { Button } from "@/app/components/ui/button";
 import {
   Card,
@@ -20,6 +20,11 @@ import { Badge } from "@/app/components/ui/badge";
 import { Label } from "@/app/components/ui/label";
 import { toast } from "sonner";
 import { updateOrgSettings } from "./server-functions/settings";
+import {
+  startConnectOnboarding,
+  refreshConnectStatus,
+  disconnectStripeConnect,
+} from "@/stripe/server-functions/connect";
 
 const REQUIREMENT_OPTIONS = [
   {
@@ -45,6 +50,8 @@ const REQUIREMENT_OPTIONS = [
 interface Settings {
   bidderRequirement: string;
   stripeConnectAccountId: string | null;
+  stripeChargesEnabled: number;
+  stripeConfigured: boolean;
 }
 
 export function AdminSettingsClient({
@@ -57,6 +64,33 @@ export function AdminSettingsClient({
   );
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState("");
+  const [stripeState, setStripeState] = useState({
+    connected: !!initialSettings.stripeConnectAccountId,
+    chargesEnabled: !!initialSettings.stripeChargesEnabled,
+    configured: initialSettings.stripeConfigured,
+  });
+  const [connectPending, setConnectPending] = useState(false);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("stripe") === "return") {
+      // Clean URL
+      window.history.replaceState({}, "", window.location.pathname);
+      // Sync status from Stripe
+      refreshConnectStatus().then((result) => {
+        setStripeState((prev) => ({
+          ...prev,
+          chargesEnabled: result.stripeChargesEnabled,
+          connected: true,
+        }));
+        if (result.stripeChargesEnabled) {
+          toast.success("Stripe Connect is active");
+        } else {
+          toast.info("Stripe onboarding incomplete — resume when ready");
+        }
+      });
+    }
+  }, []);
 
   function handleSave() {
     setError("");
@@ -70,7 +104,32 @@ export function AdminSettingsClient({
     });
   }
 
-  const isConnected = !!initialSettings.stripeConnectAccountId;
+  async function handleConnect() {
+    setConnectPending(true);
+    try {
+      const { url } = await startConnectOnboarding();
+      window.location.href = url;
+    } catch (e: any) {
+      setError(e.message);
+      setConnectPending(false);
+    }
+  }
+
+  async function handleDisconnect() {
+    if (!confirm("Disconnect Stripe account? This won't delete it from Stripe, but you'll need to reconnect to accept payments.")) {
+      return;
+    }
+    setConnectPending(true);
+    try {
+      await disconnectStripeConnect();
+      setStripeState({ connected: false, chargesEnabled: false, configured: true });
+      toast.success("Stripe disconnected");
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setConnectPending(false);
+    }
+  }
 
   return (
     <div>
@@ -123,17 +182,58 @@ export function AdminSettingsClient({
         <CardHeader>
           <CardTitle>Stripe Connect</CardTitle>
         </CardHeader>
-        <CardContent>
-          <div className="flex items-center gap-2">
-            <span className="text-sm text-muted-foreground">Status:</span>
-            {isConnected ? (
+        <CardContent className="space-y-3">
+          {!stripeState.configured ? (
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-muted-foreground">
+                Payments not configured
+              </span>
+            </div>
+          ) : !stripeState.connected ? (
+            <div className="flex items-center gap-3">
+              <Badge variant="secondary">Not Connected</Badge>
+              <Button
+                onClick={handleConnect}
+                disabled={connectPending}
+              >
+                {connectPending ? "Redirecting..." : "Connect with Stripe"}
+              </Button>
+            </div>
+          ) : stripeState.chargesEnabled ? (
+            <div className="flex items-center gap-3">
               <Badge className="bg-green-100 text-green-700 hover:bg-green-100">
                 Connected
               </Badge>
-            ) : (
-              <Badge variant="secondary">Not Connected</Badge>
-            )}
-          </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleDisconnect}
+                disabled={connectPending}
+              >
+                Disconnect
+              </Button>
+            </div>
+          ) : (
+            <div className="flex items-center gap-3">
+              <Badge variant="outline" className="border-amber-500 text-amber-600">
+                Onboarding Incomplete
+              </Badge>
+              <Button
+                onClick={handleConnect}
+                disabled={connectPending}
+              >
+                {connectPending ? "Redirecting..." : "Resume"}
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleDisconnect}
+                disabled={connectPending}
+              >
+                Disconnect
+              </Button>
+            </div>
+          )}
         </CardContent>
       </Card>
 

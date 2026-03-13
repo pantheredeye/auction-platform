@@ -5,7 +5,8 @@ import { requestInfo } from "rwsdk/worker";
 
 export async function listLiveAuctions() {
   const { ctx } = requestInfo;
-  const orgId = ctx.currentOrganization!.id;
+  const orgId = ctx.currentOrganization?.id;
+  if (!orgId) return [];
 
   const rows = await db
     .selectFrom("auctions")
@@ -37,7 +38,8 @@ export async function listLiveAuctions() {
 
 export async function getAuctionBySlug(slug: string) {
   const { ctx } = requestInfo;
-  const orgId = ctx.currentOrganization!.id;
+  const orgId = ctx.currentOrganization?.id;
+  if (!orgId) return null;
 
   const auction = await db
     .selectFrom("auctions")

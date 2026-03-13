@@ -458,7 +458,7 @@ export function AuctionRoomClient({
         </div>
 
         {/* Right: Chat panel — always visible on desktop (md+) */}
-        <aside className="hidden md:flex md:w-2/5 border-l flex-col overflow-hidden">
+        <aside className="hidden md:flex md:w-2/5 border-l flex-col overflow-hidden touch-manipulation">
           <ChatPanel
             chatMessages={chatMessages}
             viewerCount={viewerCount}
@@ -846,7 +846,7 @@ function ChatPanel({
         <h2 className="text-xs font-medium text-muted-foreground uppercase tracking-wide hidden md:block">Chat</h2>
         <span className="text-xs text-muted-foreground">{viewerCount} watching</span>
       </div>
-      <div className="flex-1 overflow-y-auto p-3 space-y-2">
+      <div className="flex-1 overflow-y-auto p-3 space-y-2 overscroll-contain [scrollbar-gutter:stable] [will-change:scroll-position]" aria-live="polite">
         {chatMessages.length === 0 && (
           <p className="text-xs text-muted-foreground text-center py-4">No messages yet</p>
         )}
@@ -873,6 +873,7 @@ function ChatInput({
   onSend: (content: string) => void;
 }) {
   const [message, setMessage] = useState("");
+  const inputRef = useRef<HTMLInputElement | null>(null);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -880,13 +881,16 @@ function ChatInput({
     if (!trimmed) return;
     onSend(trimmed);
     setMessage("");
+    inputRef.current?.focus();
   };
 
   return (
-    <form onSubmit={handleSubmit} className="border-t p-3 flex gap-2">
+    <form onSubmit={handleSubmit} className="border-t p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] flex gap-2">
       <Input
+        ref={inputRef}
         value={message}
         onChange={(e) => setMessage(e.target.value)}
+        enterKeyHint="send"
         placeholder="Say something..."
         className="h-8 text-sm"
         disabled={!isConnected}

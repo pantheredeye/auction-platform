@@ -44,6 +44,7 @@ export interface OrganizationsTable {
   hammerFeePct: number;
   bidderRequirement: string;
   stripeConnectAccountId: string | null;
+  stripeChargesEnabled: number;
   createdAt: string;
   updatedAt: string;
 }

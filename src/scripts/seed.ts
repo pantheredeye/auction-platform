@@ -14,6 +14,7 @@ export default async () => {
       hammerFeePct: 300,
       bidderRequirement: "guest",
       stripeConnectAccountId: null,
+      stripeChargesEnabled: 0,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     })

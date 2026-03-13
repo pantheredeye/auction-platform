@@ -1,4 +1,5 @@
 "use server";
+import { env } from "cloudflare:workers";
 import { db } from "@/db";
 import { requestInfo } from "rwsdk/worker";
 import { logAudit } from "@/lib/audit";
@@ -244,6 +245,20 @@ export async function transitionAuctionStatus(
     auction.status as AuctionStatus,
     toStatus as AuctionStatus,
   );
+
+  // Gate: require Stripe Connect for going live
+  if (toStatus === "live" && env.STRIPE_SECRET_KEY) {
+    const org = await db
+      .selectFrom("organizations")
+      .select(["stripeChargesEnabled"])
+      .where("id", "=", orgId)
+      .executeTakeFirstOrThrow();
+    if (!org.stripeChargesEnabled) {
+      throw new Error(
+        "Stripe Connect required. Set up payments in Organization Settings before going live.",
+      );
+    }
+  }
 
   const now = new Date().toISOString();
 

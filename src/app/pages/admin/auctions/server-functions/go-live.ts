@@ -4,10 +4,26 @@ import { env } from "cloudflare:workers";
 import { requestInfo } from "rwsdk/worker";
 import { logAudit } from "@/lib/audit";
 
+async function assertStripeConnect(orgId: string) {
+  if (!env.STRIPE_SECRET_KEY) return; // dev mode — no Stripe configured
+  const org = await db
+    .selectFrom("organizations")
+    .select(["stripeChargesEnabled"])
+    .where("id", "=", orgId)
+    .executeTakeFirstOrThrow();
+  if (!org.stripeChargesEnabled) {
+    throw new Error(
+      "Stripe Connect required. Set up payments in Organization Settings before going live.",
+    );
+  }
+}
+
 export async function quickGoLive() {
   const { ctx } = requestInfo;
   const orgId = ctx.currentOrganization!.id;
   const userId = ctx.user!.id;
+
+  await assertStripeConnect(orgId);
 
   const id = crypto.randomUUID();
   const now = new Date();

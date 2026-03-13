@@ -61,6 +61,18 @@ export async function handleStripeWebhook(
         .execute();
       break;
     }
+    case "account.updated": {
+      const account = event.data.object;
+      await db
+        .updateTable("organizations")
+        .set({
+          stripeChargesEnabled: account.charges_enabled ? 1 : 0,
+          updatedAt: now,
+        })
+        .where("stripeConnectAccountId", "=", account.id)
+        .execute();
+      break;
+    }
   }
 
   return new Response("ok", { status: 200 });

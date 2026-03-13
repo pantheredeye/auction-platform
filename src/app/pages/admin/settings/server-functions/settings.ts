@@ -1,4 +1,5 @@
 "use server";
+import { env } from "cloudflare:workers";
 import { db } from "@/db";
 import { requestInfo } from "rwsdk/worker";
 
@@ -8,11 +9,20 @@ export async function getOrgSettings() {
 
   const result = await db
     .selectFrom("organizations")
-    .select(["bidderRequirement", "stripeConnectAccountId"])
+    .select([
+      "bidderRequirement",
+      "stripeConnectAccountId",
+      "stripeChargesEnabled",
+    ])
     .where("id", "=", orgId)
     .executeTakeFirst();
 
-  return result ?? { bidderRequirement: "guest", stripeConnectAccountId: null };
+  return {
+    bidderRequirement: result?.bidderRequirement ?? "guest",
+    stripeConnectAccountId: result?.stripeConnectAccountId ?? null,
+    stripeChargesEnabled: result?.stripeChargesEnabled ?? 0,
+    stripeConfigured: !!env.STRIPE_SECRET_KEY,
+  };
 }
 
 export async function updateOrgSettings({
