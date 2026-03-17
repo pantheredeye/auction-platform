@@ -57,6 +57,8 @@ export class AuctionRoomDO extends DurableObject<Cloudflare.Env> {
   private chatBuffer: BufferedChatEvent[] = [];
   private chatHistory: BufferedChatEvent[] = [];
   private chatRateLimits = new Map<string, number>();
+  private lastStreamHeartbeat: number | null = null;
+  private streamWasActive = false;
 
   constructor(ctx: DurableObjectState, env: Cloudflare.Env) {
     super(ctx, env);
@@ -155,7 +157,7 @@ export class AuctionRoomDO extends DurableObject<Cloudflare.Env> {
       status: auction.status as AuctionRoomState["status"],
       lots: lotsMap,
       currentLotId: null,
-      viewerCount: this.ctx.getWebSockets().length,
+      viewerCount: this.getViewerCount(),
       connectedUsers: new Set(),
       defaultIncrementCents: auction.defaultIncrementCents,
       incrementRules,
@@ -208,7 +210,7 @@ export class AuctionRoomDO extends DurableObject<Cloudflare.Env> {
     } satisfies SocketAttachment);
 
     this.state.connectedUsers.add(userId);
-    this.state.viewerCount = this.ctx.getWebSockets().length;
+    this.state.viewerCount = this.getViewerCount();
 
     this.broadcast({ type: "viewer_count", count: this.state.viewerCount });
     this.sendStateSnapshot(server);
@@ -265,6 +267,39 @@ export class AuctionRoomDO extends DurableObject<Cloudflare.Env> {
       });
     }
 
+    // Stale stream check
+    const staleCheckAt = await this.ctx.storage.get<number>("staleCheckAt");
+    if (staleCheckAt && Date.now() >= staleCheckAt) {
+      if (!this.hasConnectedAdmin()) {
+        await this.cleanupStaleStream();
+      }
+      await this.ctx.storage.delete("staleCheckAt");
+    } else if (staleCheckAt && staleCheckAt > Date.now()) {
+      // Re-schedule alarm for stale check if it's in the future
+      const existing = await this.ctx.storage.getAlarm();
+      if (!existing || existing > staleCheckAt) {
+        await this.ctx.storage.setAlarm(staleCheckAt);
+      }
+    }
+
+    // Auto-finalize stuck recordings (uploading > 5min)
+    if (this.state.auctionId) {
+      try {
+        const db = new Kysely<AppDatabase>({
+          dialect: new D1Dialect({ database: this.env.DB }),
+        });
+        await db
+          .updateTable("auctions")
+          .set({ recording_status: "ready", updatedAt: new Date().toISOString() })
+          .where("id", "=", this.state.auctionId)
+          .where("recording_status", "=", "uploading")
+          .where("updatedAt", "<", new Date(Date.now() - 5 * 60 * 1000).toISOString())
+          .execute();
+      } catch {
+        // best-effort
+      }
+    }
+
     // Periodic chat buffer flush
     await this.flushChatBuffer();
   }
@@ -279,8 +314,13 @@ export class AuctionRoomDO extends DurableObject<Cloudflare.Env> {
     if (attachment) {
       this.state.connectedUsers.delete(attachment.userId);
       this.chatRateLimits.delete(attachment.userId);
+
+      // If admin disconnected and no other admins remain, schedule stale stream check
+      if (attachment.isAdmin && this.streamWasActive && !this.hasConnectedAdmin()) {
+        await this.scheduleStaleCheck();
+      }
     }
-    this.state.viewerCount = this.ctx.getWebSockets().length;
+    this.state.viewerCount = this.getViewerCount();
     this.broadcast({ type: "viewer_count", count: this.state.viewerCount });
   }
 
@@ -291,7 +331,7 @@ export class AuctionRoomDO extends DurableObject<Cloudflare.Env> {
     if (attachment) {
       this.state.connectedUsers.delete(attachment.userId);
     }
-    this.state.viewerCount = this.ctx.getWebSockets().length;
+    this.state.viewerCount = this.getViewerCount();
     this.broadcast({ type: "viewer_count", count: this.state.viewerCount });
   }
 
@@ -309,6 +349,17 @@ export class AuctionRoomDO extends DurableObject<Cloudflare.Env> {
     }
 
     const { type } = parsed;
+
+    if (type === "stream_heartbeat") {
+      const attachment = ws.deserializeAttachment() as SocketAttachment | null;
+      if (attachment?.isAdmin) {
+        this.lastStreamHeartbeat = Date.now();
+        this.streamWasActive = true;
+        // Clear any pending stale check since admin is alive
+        await this.ctx.storage.delete("staleCheckAt");
+      }
+      return;
+    }
 
     if (type === "bid") {
       await this.handleBid(ws, parsed as unknown as ClientMessage & { type: "bid" });
@@ -1157,7 +1208,66 @@ export class AuctionRoomDO extends DurableObject<Cloudflare.Env> {
     });
   }
 
+  // ─── Stale stream helpers ───────────────────────────────────────
+
+  private hasConnectedAdmin(): boolean {
+    return this.ctx.getWebSockets("admin").length > 0;
+  }
+
+  private async scheduleStaleCheck() {
+    const db = new Kysely<AppDatabase>({
+      dialect: new D1Dialect({ database: this.env.DB }),
+    });
+    const org = await db
+      .selectFrom("organizations")
+      .select("streamGracePeriodSec")
+      .where("id", "=", this.state.organizationId)
+      .executeTakeFirst();
+    const graceSec = org?.streamGracePeriodSec ?? 90;
+    const staleCheckAt = Date.now() + graceSec * 1000;
+    await this.ctx.storage.put("staleCheckAt", staleCheckAt);
+
+    const existing = await this.ctx.storage.getAlarm();
+    if (!existing || existing > staleCheckAt) {
+      await this.ctx.storage.setAlarm(staleCheckAt);
+    }
+  }
+
+  private async cleanupStaleStream() {
+    try {
+      const callsApi = `${this.env.CALLS_API}/v1/apps/${this.env.CALLS_APP_ID}`;
+      const callsAuth = { Authorization: `Bearer ${this.env.CALLS_APP_SECRET}` };
+
+      // Close Calls sessions via LiveStore
+      const doId = this.env.LIVE_STORE.idFromName(this.state.auctionId);
+      const store = this.env.LIVE_STORE.get(doId);
+      const tracks = await store.getTracks();
+      const sessionIds = [...new Set(tracks.map((t: { sessionId: string }) => t.sessionId))];
+      await Promise.allSettled(
+        sessionIds.map((sid) =>
+          fetch(`${callsApi}/sessions/${sid}/close`, {
+            method: "PUT",
+            headers: callsAuth,
+          }),
+        ),
+      );
+      await store.deleteTracks();
+    } catch {
+      // best-effort cleanup
+    }
+
+    this.broadcast({ type: "stream_paused", reason: "host_disconnected" });
+    this.lastStreamHeartbeat = null;
+    this.streamWasActive = false;
+  }
+
   // ─── Helpers ────────────────────────────────────────────────────
+
+  private getViewerCount(): number {
+    const all = this.ctx.getWebSockets().length;
+    const admin = this.ctx.getWebSockets("admin").length;
+    return all - admin;
+  }
 
   private broadcastLotUpdate(lot: LotState) {
     this.broadcast({
@@ -1310,7 +1420,7 @@ export class AuctionRoomDO extends DurableObject<Cloudflare.Env> {
         status: stored.status as AuctionRoomState["status"],
         lots: new Map(stored.lots),
         currentLotId: stored.currentLotId,
-        viewerCount: this.ctx.getWebSockets().length,
+        viewerCount: this.getViewerCount(),
         connectedUsers: new Set(
           this.ctx.getWebSockets()
             .map((ws) => (ws.deserializeAttachment() as SocketAttachment | null)?.userId)

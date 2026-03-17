@@ -137,6 +137,7 @@ export type ClientMessage =
   | { type: "bid"; lotId: string; amountCents: number; idempotencyKey: string }
   | { type: "claim"; lotId: string; quantity: number; idempotencyKey: string }
   | { type: "chat"; content: string }
+  | { type: "stream_heartbeat" }
   | { type: "ping" };
 
 export type ServerMessage =
@@ -151,6 +152,7 @@ export type ServerMessage =
   | { type: "pong" }
   | { type: "chat_history"; messages: ChatMessage[] }
   | { type: "stream_ended" }
+  | { type: "stream_paused"; reason: string }
   | { type: "error"; message: string }
   | { type: "registration_required"; requirement: string };
 

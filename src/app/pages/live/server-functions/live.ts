@@ -21,6 +21,8 @@ export async function getAuctionBySlug(slug: string) {
       "auctions.extensionSeconds",
       "auctions.organizationId",
       "organizations.bidderRequirement as orgBidderRequirement",
+      "organizations.name as orgName",
+      "organizations.slateImageUrl as orgSlateImageUrl",
       "auctions.bidderRequirement as auctionBidderRequirement",
     ])
     .where("auctions.slug", "=", slug)

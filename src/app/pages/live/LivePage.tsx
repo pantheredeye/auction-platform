@@ -50,10 +50,13 @@ export async function LivePage({ ctx, params }: RequestInfo) {
     );
   }
 
-  const guest = ctx.guest;
-  const existingRegistration = guest
-    ? await getGuestRegistrationStatus(guest.id)
-    : null;
+  // Authenticated users get a synthetic guest identity from their user record
+  const guest = ctx.guest ?? (ctx.user ? { id: ctx.user.id, name: ctx.user.name } : null);
+  const existingRegistration = ctx.user
+    ? { registered: true, hasCard: true, userId: ctx.user.id, userName: ctx.user.name, userEmail: ctx.user.email }
+    : guest
+      ? await getGuestRegistrationStatus(guest.id)
+      : null;
   const bidderRequirement = resolveRequirement(
     auction.orgBidderRequirement as BidderRequirement,
     (auction.auctionBidderRequirement as BidderRequirement) ?? null,

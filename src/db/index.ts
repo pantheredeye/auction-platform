@@ -45,6 +45,8 @@ export interface OrganizationsTable {
   bidderRequirement: string;
   stripeConnectAccountId: string | null;
   stripeChargesEnabled: number;
+  streamGracePeriodSec: number;
+  slateImageUrl: string | null;
   createdAt: string;
   updatedAt: string;
 }

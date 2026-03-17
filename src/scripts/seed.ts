@@ -15,6 +15,8 @@ export default async () => {
       bidderRequirement: "guest",
       stripeConnectAccountId: null,
       stripeChargesEnabled: 0,
+      streamGracePeriodSec: 90,
+      slateImageUrl: null,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     })

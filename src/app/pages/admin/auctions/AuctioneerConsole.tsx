@@ -203,6 +203,8 @@ export function AuctioneerConsole({ auction, initialLots }: AuctioneerConsolePro
   const reconnectAttempt = useRef(0);
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isMounted = useRef(true);
+  const handleServerMessageRef = useRef<(msg: ServerMessage) => void>(() => {});
+  const streamStatusRef = useRef<StreamStatus>(streamStatus);
 
   const sendMessage = useCallback((msg: AdminMessage) => {
     const ws = wsRef.current;
@@ -530,11 +532,18 @@ export function AuctioneerConsole({ auction, initialLots }: AuctioneerConsolePro
         toast.error(`Claim rejected: ${msg.reason}`);
         break;
 
+      case "chat_history":
+        setChatMessages(msg.messages);
+        break;
+
       case "chat_message":
-        setChatMessages((prev) => [
-          ...prev,
-          { id: msg.id, userId: msg.userId, username: msg.username, content: msg.content, createdAt: msg.createdAt },
-        ].slice(-100));
+        setChatMessages((prev) => {
+          if (prev.some((m) => m.id === msg.id)) return prev;
+          return [
+            ...prev,
+            { id: msg.id, userId: msg.userId, username: msg.username, content: msg.content, createdAt: msg.createdAt },
+          ].slice(-100);
+        });
         break;
 
       case "viewer_count":
@@ -549,6 +558,10 @@ export function AuctioneerConsole({ auction, initialLots }: AuctioneerConsolePro
         break;
     }
   }, [initialLots]);
+
+  // Keep refs in sync each render
+  handleServerMessageRef.current = handleServerMessage;
+  streamStatusRef.current = streamStatus;
 
   useEffect(() => {
     isMounted.current = true;
@@ -572,7 +585,7 @@ export function AuctioneerConsole({ auction, initialLots }: AuctioneerConsolePro
       ws.onmessage = (event) => {
         try {
           const msg: ServerMessage = JSON.parse(event.data);
-          handleServerMessage(msg);
+          handleServerMessageRef.current(msg);
         } catch {
           // ignore malformed messages
         }
@@ -605,15 +618,23 @@ export function AuctioneerConsole({ auction, initialLots }: AuctioneerConsolePro
       }
     }, 30000);
 
+    // Stream heartbeat (15s)
+    const heartbeatInterval = setInterval(() => {
+      if (wsRef.current?.readyState === WebSocket.OPEN && streamStatusRef.current === "live") {
+        wsRef.current.send(JSON.stringify({ type: "stream_heartbeat" }));
+      }
+    }, 15000);
+
     connect();
 
     return () => {
       isMounted.current = false;
       clearInterval(pingInterval);
+      clearInterval(heartbeatInterval);
       if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
       wsRef.current?.close();
     };
-  }, [auction.id, handleServerMessage]);
+  }, [auction.id]);
 
   // ─── Derived state ──────────────────────────────────────────────
 
@@ -877,6 +898,7 @@ export function AuctioneerConsole({ auction, initialLots }: AuctioneerConsolePro
                   hasClaims={currentLotState.quantityClaimed > 0}
                   quantity={currentLotState.quantity}
                   quantityClaimed={currentLotState.quantityClaimed}
+                  currentPriceCents={currentLotState.currentBidCents ?? 0}
                   hasPendingLots={hasPendingLots}
                   isConnected={isConnected}
                   onSend={sendMessage}
@@ -957,6 +979,7 @@ export function AuctioneerConsole({ auction, initialLots }: AuctioneerConsolePro
                   hasClaims={currentLotState.quantityClaimed > 0}
                   quantity={currentLotState.quantity}
                   quantityClaimed={currentLotState.quantityClaimed}
+                  currentPriceCents={currentLotState.currentBidCents ?? 0}
                   hasPendingLots={hasPendingLots}
                   isConnected={isConnected}
                   onSend={sendMessage}
@@ -1175,6 +1198,7 @@ function AuctionControlsPanel({
   hasClaims,
   quantity,
   quantityClaimed,
+  currentPriceCents,
   hasPendingLots,
   isConnected,
   onSend,
@@ -1186,6 +1210,7 @@ function AuctionControlsPanel({
   hasClaims: boolean;
   quantity: number;
   quantityClaimed: number;
+  currentPriceCents: number;
   hasPendingLots: boolean;
   isConnected: boolean;
   onSend: (msg: AdminMessage) => void;
@@ -1202,7 +1227,7 @@ function AuctionControlsPanel({
       <div className="space-y-3">
         {/* Set price input */}
         {lotStatus === "active" && (
-          <SetPriceForm lotId={lotId} isConnected={isConnected} onSend={onSend} />
+          <SetPriceForm lotId={lotId} currentPriceCents={currentPriceCents} isConnected={isConnected} onSend={onSend} />
         )}
 
         <div className="flex flex-wrap items-center gap-2">
@@ -1318,23 +1343,40 @@ function AuctionControlsPanel({
   );
 }
 
+function getStepForPrice(dollars: number): string {
+  if (dollars < 50) return "1";
+  if (dollars < 250) return "5";
+  if (dollars < 1000) return "10";
+  if (dollars < 5000) return "25";
+  return "50";
+}
+
 function SetPriceForm({
   lotId,
+  currentPriceCents,
   isConnected,
   onSend,
 }: {
   lotId: string;
+  currentPriceCents: number;
   isConnected: boolean;
   onSend: (msg: AdminMessage) => void;
 }) {
-  const [price, setPrice] = useState("");
+  const [price, setPrice] = useState(() => (currentPriceCents / 100).toString());
+  const isDirty = useRef(false);
+
+  useEffect(() => {
+    if (!isDirty.current) {
+      setPrice((currentPriceCents / 100).toString());
+    }
+  }, [currentPriceCents]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const dollars = parseFloat(price);
     if (isNaN(dollars) || dollars <= 0) return;
     onSend({ type: "set_price", lotId, priceCents: Math.round(dollars * 100) });
-    setPrice("");
+    isDirty.current = false;
   };
 
   return (
@@ -1344,9 +1386,10 @@ function SetPriceForm({
         <Input
           type="number"
           min="0.01"
-          step="0.01"
+          step={getStepForPrice(parseFloat(price) || 0)}
           value={price}
-          onChange={(e) => setPrice(e.target.value)}
+          onChange={(e) => { isDirty.current = true; setPrice(e.target.value); }}
+          onBlur={() => { isDirty.current = false; }}
           placeholder="New price"
           className="h-8 text-sm"
         />

@@ -6,6 +6,7 @@ import { nanoid } from "nanoid";
 import { toast } from "sonner";
 import { formatCents, dollarsToCents } from "@/lib/money";
 import { RegistrationPanel } from "./RegistrationPanel";
+import { StreamSlate } from "./StreamSlate";
 
 // ─── Types ──────────────────────────────────────────────────────────
 
@@ -34,6 +35,8 @@ export interface LiveAuctionData {
   buyerPremiumPct: number;
   extensionSeconds: number;
   organizationId: string;
+  orgName: string;
+  orgSlateImageUrl: string | null;
   activeLot: {
     id: string;
     lotNumber: number;
@@ -320,7 +323,16 @@ function ChatInput({
         >
           Tap to join chat
         </button>
-        <BidButton currentLot={currentLot} registrationComplete={registrationComplete} onRegistrationGate={onRegistrationGate} onBidTap={onBidTap} />
+        <button
+          type="button"
+          onClick={onRegistrationGate}
+          aria-label="Send"
+          className="shrink-0 h-12 w-12 rounded-lg border border-zinc-600 bg-zinc-900 text-white cursor-pointer hover:border-zinc-500 transition-colors flex items-center justify-center"
+        >
+          <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+            <path d="M10 16V4M10 4L5 9M10 4L15 9" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </button>
       </div>
     );
   }
@@ -330,6 +342,7 @@ function ChatInput({
       <input
         ref={inputRef}
         type="text"
+        autoFocus
         value={value}
         onChange={(e) => setValue(e.target.value)}
         onKeyDown={(e) => {
@@ -343,7 +356,17 @@ function ChatInput({
         maxLength={500}
         className="flex-1 min-w-0 h-12 px-4 rounded-lg border border-zinc-600 bg-zinc-900 text-lg text-white placeholder:text-zinc-500 focus:outline-none focus:ring-2 focus:ring-zinc-400"
       />
-      <BidButton currentLot={currentLot} registrationComplete={registrationComplete} onRegistrationGate={onRegistrationGate} onBidTap={onBidTap} />
+      <button
+        type="button"
+        onClick={handleSubmit}
+        disabled={!value.trim()}
+        aria-label="Send"
+        className="shrink-0 h-12 w-12 rounded-lg border border-zinc-600 bg-zinc-900 text-white cursor-pointer hover:border-zinc-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
+      >
+        <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+          <path d="M10 16V4M10 4L5 9M10 4L15 9" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      </button>
     </div>
   );
 }
@@ -447,6 +470,7 @@ export function LiveViewerClient({ auction, guest: initialGuest, bidderRequireme
   const [guest, setGuest] = useState<GuestInfo | null>(initialGuest);
   const [bidMode, setBidMode] = useState(false);
   const [confirmingBidCents, setConfirmingBidCents] = useState<number | null>(null);
+  const [streamStale, setStreamStale] = useState(false);
 
   // Incrementing this forces the WS effect to re-run (close + reconnect)
   const [wsReconnectTrigger, setWsReconnectTrigger] = useState(0);
@@ -528,7 +552,13 @@ export function LiveViewerClient({ auction, guest: initialGuest, bidderRequireme
         setChatMessages(msg.messages);
         break;
       case "chat_message":
-        setChatMessages((prev) => [...prev, msg]);
+        setChatMessages((prev) => {
+          if (prev.some((m) => m.id === msg.id)) return prev;
+          return [...prev, msg];
+        });
+        break;
+      case "stream_paused":
+        setStreamStale(true);
         break;
       case "bid_accepted":
         toast.success(`Your bid of ${formatCents(msg.amountCents)} was placed!`);
@@ -580,6 +610,9 @@ export function LiveViewerClient({ auction, guest: initialGuest, bidderRequireme
           videoRef.current.srcObject = new MediaStream();
         }
         (videoRef.current.srcObject as MediaStream).addTrack(event.track);
+        setStreamStale(false);
+        event.track.onmute = () => setStreamStale(true);
+        event.track.onended = () => setStreamStale(true);
       };
 
       pc.onconnectionstatechange = () => {
@@ -632,7 +665,7 @@ export function LiveViewerClient({ auction, guest: initialGuest, bidderRequireme
     }
     const delay = Math.min(1000 * Math.pow(2, reconnectAttempt.current), 10000);
     reconnectAttempt.current++;
-    setStreamStatus("connecting");
+    setStreamStatus((prev) => prev === "waiting" ? "waiting" : "connecting");
     reconnectTimer.current = setTimeout(() => {
       if (mountedRef.current) connectWhep(url);
     }, delay);
@@ -775,72 +808,16 @@ export function LiveViewerClient({ auction, guest: initialGuest, bidderRequireme
             className="absolute inset-0 w-full h-full object-cover"
           />
 
-          {/* Unmute overlay */}
-          {muted && streamStatus === "live" && (
-            <button
-              type="button"
-              onClick={() => setMuted(false)}
-              className="absolute inset-0 z-10 flex items-center justify-center bg-black/60 cursor-pointer"
-              aria-label="Tap to hear audio"
-            >
-              <span className="text-white text-lg font-semibold">
-                Tap to hear audio
-              </span>
-            </button>
-          )}
-
-          {/* LIVE badge */}
-          {streamStatus === "live" && (
-            <div className="absolute top-4 left-4 z-20">
-              <span className="inline-flex items-center gap-1.5 rounded bg-green-600 px-2.5 py-1 text-sm font-semibold text-white uppercase tracking-wide">
-                <span className="inline-block h-2 w-2 rounded-full bg-white animate-pulse" aria-hidden="true" />
-                Live
-              </span>
-            </div>
-          )}
-
-          {/* Stream status overlays */}
-          {streamStatus === "connecting" && (
-            <div className="absolute inset-0 flex flex-col items-center justify-center gap-4">
-              <div
-                className="h-10 w-10 rounded-full border-4 border-white/30 border-t-white animate-spin"
-                role="status"
-                aria-label="Connecting to stream"
-              />
-              <p className="text-white text-lg font-medium">
-                Connecting to stream...
-              </p>
-            </div>
-          )}
-          {streamStatus === "waiting" && (
-            <div className="absolute inset-0 flex flex-col items-center justify-center gap-3">
-              <h2 className="text-2xl font-bold text-white">{auction.title}</h2>
-              <p className="text-white text-lg font-medium">
-                Stream starting soon
-              </p>
-            </div>
-          )}
-          {streamStatus === "ended" && (
-            <div className="absolute inset-0 flex items-center justify-center">
-              <p className="text-white text-lg font-semibold">
-                Auction has ended
-              </p>
-            </div>
-          )}
-          {streamStatus === "error" && (
-            <div className="absolute inset-0 flex flex-col items-center justify-center gap-4">
-              <p className="text-white text-lg font-medium">
-                Something went wrong. Try refreshing.
-              </p>
-              <button
-                type="button"
-                onClick={() => { reconnectAttempt.current = 0; connectWhep(whepUrl); }}
-                className="h-12 min-w-12 px-6 rounded-lg bg-white text-black text-lg font-semibold cursor-pointer hover:bg-zinc-200 transition-colors"
-              >
-                Retry
-              </button>
-            </div>
-          )}
+          <StreamSlate
+            streamStatus={streamStatus}
+            streamStale={streamStale}
+            auctionTitle={auction.title}
+            orgName={auction.orgName}
+            slateImageUrl={auction.orgSlateImageUrl}
+            onRetry={() => { reconnectAttempt.current = 0; connectWhep(whepUrl); }}
+            onUnmute={() => setMuted(false)}
+            muted={muted}
+          />
         </div>
 
         {/* Status bar */}
