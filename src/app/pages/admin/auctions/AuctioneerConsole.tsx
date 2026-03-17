@@ -783,6 +783,7 @@ export function AuctioneerConsole({ auction, initialLots }: AuctioneerConsolePro
             <PostStreamSummary
               title={auction.title}
               slug={auction.slug}
+              auctionId={auction.id}
               durationSecs={streamDurationSecs}
               recordingResult={recordingResult}
               canRestart={auctionStatus !== "closed" && auctionStatus !== "settled" && auctionStatus !== "archived"}
@@ -1567,6 +1568,7 @@ function formatDuration(secs: number): string {
 function PostStreamSummary({
   title,
   slug,
+  auctionId,
   durationSecs,
   recordingResult,
   canRestart,
@@ -1574,6 +1576,7 @@ function PostStreamSummary({
 }: {
   title: string;
   slug: string;
+  auctionId: string;
   durationSecs: number;
   recordingResult: RecordingResult | null;
   canRestart: boolean;
@@ -1619,6 +1622,16 @@ function PostStreamSummary({
               <p className="text-sm text-green-600 dark:text-green-400 font-medium">Recording saved</p>
             )}
           </div>
+        )}
+
+        {/* View recording link */}
+        {recordingResult?.success && (
+          <a
+            href={`/admin/auctions/${auctionId}/recording`}
+            className="inline-flex items-center justify-center w-full min-h-[48px] text-sm font-medium rounded-md border border-border bg-card hover:bg-accent px-4"
+          >
+            View Recording
+          </a>
         )}
 
         {/* Restart stream */}

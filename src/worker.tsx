@@ -530,6 +530,48 @@ const app = defineApp([
 
     try {
       const orgId = ctx.currentOrganization!.id;
+
+      // When marking "ready", merge all chunks into a single R2 object
+      if (body.status === "ready") {
+        const prefix = `recordings/${auctionId}/`;
+        const listed = await env.IMAGES.list({ prefix });
+        const chunkKeys = listed.objects
+          .map((o) => o.key)
+          .sort((a, b) => {
+            // Keys are recordings/{id}/{timestamp}-{chunkIndex}
+            // Sort by chunkIndex (after the dash)
+            const idxA = parseInt(a.split("-").pop() ?? "0", 10);
+            const idxB = parseInt(b.split("-").pop() ?? "0", 10);
+            return idxA - idxB;
+          });
+
+        if (chunkKeys.length > 0) {
+          // Read first chunk to determine content type
+          const firstObj = await env.IMAGES.get(chunkKeys[0]);
+          const contentType = firstObj?.httpMetadata?.contentType ?? "video/webm";
+
+          // Concatenate all chunks into a single blob
+          const parts: ArrayBuffer[] = [];
+          for (const key of chunkKeys) {
+            const obj = await env.IMAGES.get(key);
+            if (obj) {
+              parts.push(await obj.arrayBuffer());
+            }
+          }
+
+          const merged = new Blob(parts, { type: contentType });
+          const mergedKey = `recordings/${auctionId}`;
+          await env.IMAGES.put(mergedKey, await merged.arrayBuffer(), {
+            httpMetadata: { contentType },
+          });
+
+          // Clean up individual chunks
+          for (const key of chunkKeys) {
+            await env.IMAGES.delete(key);
+          }
+        }
+      }
+
       await db
         .updateTable("auctions")
         .set({ recording_status: body.status, updatedAt: new Date().toISOString() })
