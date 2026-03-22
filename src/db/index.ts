@@ -400,6 +400,18 @@ export interface AuctionSummariesTable {
   updatedAt: string;
 }
 
+export interface InviteCodesTable {
+  id: string;
+  organizationId: string;
+  code: string;
+  role: string;
+  createdByUserId: string;
+  usedByUserId: string | null;
+  usedAt: string | null;
+  expiresAt: string;
+  createdAt: string;
+}
+
 // ─── Database interface ─────────────────────────────────────────────
 
 export interface AppDatabase {
@@ -429,6 +441,7 @@ export interface AppDatabase {
   payment_methods: PaymentMethodsTable;
   bidder_registrations: BidderRegistrationsTable;
   terms_acceptances: TermsAcceptancesTable;
+  invite_codes: InviteCodesTable;
 }
 
 // ─── Type aliases ───────────────────────────────────────────────────

@@ -39,6 +39,16 @@ import { AdminImportPage } from "@/app/pages/admin/catalog/AdminImportPage";
 // Admin settings page
 import { AdminSettingsPage } from "@/app/pages/admin/settings/AdminSettingsPage";
 
+// Admin team pages
+import { AdminTeamPage } from "@/app/pages/admin/team/AdminTeamPage";
+
+// Admin customer pages
+import { AdminCustomersPage } from "@/app/pages/admin/customers/AdminCustomersPage";
+import { AdminCustomerDetailPage } from "@/app/pages/admin/customers/AdminCustomerDetailPage";
+
+// Invite redemption
+import { InviteRedeemPage } from "@/app/pages/invite/InviteRedeemPage";
+
 // Admin auction pages
 import { AdminAuctionsPage } from "@/app/pages/admin/auctions/AdminAuctionsPage";
 import { AdminAuctionFormPage } from "@/app/pages/admin/auctions/AdminAuctionFormPage";
@@ -132,6 +142,9 @@ const app = defineApp([
     const url = new URL(request.url);
     if (url.pathname.startsWith("/images/")) {
       const key = url.pathname.slice("/images/".length);
+      if (!key || key.includes("..") || key.startsWith("/")) {
+        return new Response("Invalid path", { status: 400 });
+      }
       const image = await getImage(key);
       if (!image) {
         return new Response("Not found", { status: 404 });
@@ -200,7 +213,7 @@ const app = defineApp([
     if (!ctx.user) {
       const url = new URL(request.url);
       if (url.pathname.startsWith("/live/") || url.pathname.startsWith("/ws/auction/")) {
-        const guest = getOrCreateGuestId(request);
+        const guest = await getOrCreateGuestId(request);
         ctx.guest = { id: guest.guestId, name: guest.guestName };
         if (guest.setCookieHeader) {
           response.headers.append("Set-Cookie", guest.setCookieHeader);
@@ -304,25 +317,41 @@ const app = defineApp([
   },
 
   // WHIP/WHEP signaling for Cloudflare Realtime SFU
-  async ({ request }) => {
+  async ({ request, ctx }) => {
     const url = new URL(request.url);
     const method = request.method;
+    const origin = url.origin;
 
     // CORS preflight
     if (method === "OPTIONS" && (url.pathname.startsWith("/ingest/") || url.pathname.startsWith("/play/"))) {
       return new Response(null, {
         status: 204,
         headers: {
-          "Access-Control-Allow-Origin": "*",
+          "Access-Control-Allow-Origin": origin,
           "Access-Control-Allow-Methods": "POST, PATCH, DELETE, OPTIONS",
           "Access-Control-Allow-Headers": "Content-Type",
+          "Access-Control-Allow-Credentials": "true",
         },
       });
     }
 
     const corsHeaders = {
-      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Origin": origin,
+      "Access-Control-Allow-Credentials": "true",
     };
+
+    // Auth: ingest requires employee (auctioneer/admin), play requires session or guest
+    const isIngest = url.pathname.startsWith("/ingest/");
+    if (isIngest) {
+      const role = ctx.currentOrganization?.role;
+      if (!ctx.user || !role || !["super_admin", "admin", "auctioneer"].includes(role)) {
+        return Response.json({ error: "Unauthorized" }, { status: 401, headers: corsHeaders });
+      }
+    } else if (url.pathname.startsWith("/play/")) {
+      if (!ctx.user && !ctx.guest) {
+        return Response.json({ error: "Unauthorized" }, { status: 401, headers: corsHeaders });
+      }
+    }
 
     const callsApi = `${env.CALLS_API}/v1/apps/${env.CALLS_APP_ID}`;
     const callsAuth = { Authorization: `Bearer ${env.CALLS_APP_SECRET}` };
@@ -598,6 +627,7 @@ const app = defineApp([
         route("/invoices", [requireAuth, Placeholder]),
         route("/profile", [requireAuth, Placeholder]),
       ]),
+      route("/invite/:code", [requireAuth, InviteRedeemPage]),
     ]),
     ...prefix(
       "/admin",
@@ -614,6 +644,9 @@ const app = defineApp([
         route("/auctions/:id/lots", [requireEmployee, AdminLotsPage]),
         route("/auctions/:id/auctioneer", [requireEmployee, AuctioneerPage]),
         route("/auctions/:id/recording", [requireEmployee, RecordingPage]),
+        route("/team", [requireAdmin, AdminTeamPage]),
+        route("/customers", [requireEmployee, AdminCustomersPage]),
+        route("/customers/:id", [requireEmployee, AdminCustomerDetailPage]),
         route("/settings", [requireAdmin, AdminSettingsPage]),
       ]),
     ),

@@ -9,6 +9,7 @@ import {
   FileText,
   Truck,
   Users,
+  UserCheck,
   Settings,
   LogOut,
   ArrowLeft,
@@ -50,7 +51,8 @@ export const defaultAdminNavItems: NavItem[] = [
   { href: "/admin/orders", label: "Orders", icon: ShoppingCart },
   { href: "/admin/invoices", label: "Invoices", icon: FileText },
   { href: "/admin/pickups", label: "Pickups", icon: Truck },
-  { href: "/admin/users", label: "Users", icon: Users },
+  { href: "/admin/team", label: "Team", icon: Users },
+  { href: "/admin/customers", label: "Customers", icon: UserCheck },
   { href: "/admin/settings", label: "Settings", icon: Settings },
 ];
 
