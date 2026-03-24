@@ -655,6 +655,7 @@ const app = defineApp([
       layout(PlatformLayout, [route("/", [requirePlatformAdmin, Placeholder])]),
     ),
     ...prefix("/live", layout(LiveLayout, [route("/:slug", [setLiveCSP(), LivePage])])),
+    route("*", () => new Response("Not Found", { status: 404 })),
   ]),
 ]);
 
