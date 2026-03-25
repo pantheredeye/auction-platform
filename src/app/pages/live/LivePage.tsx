@@ -1,9 +1,9 @@
 import type { RequestInfo } from "rwsdk/worker";
 import { getAuctionBySlug, getGuestRegistrationStatus } from "./server-functions/live";
 import { resolveRequirement, type BidderRequirement } from "@/lib/bidder-requirement";
-import { LiveViewerClient } from "./LiveViewerClient";
+import { LiveViewerSwitch } from "./LiveViewerSwitch";
 
-export async function LivePage({ ctx, params }: RequestInfo) {
+export async function LivePage({ ctx, params, request }: RequestInfo) {
   const slug = params!.slug as string;
   const auction = await getAuctionBySlug(slug);
 
@@ -62,8 +62,11 @@ export async function LivePage({ ctx, params }: RequestInfo) {
     (auction.auctionBidderRequirement as BidderRequirement) ?? null,
   );
 
+  const viewMode = new URL(request.url).searchParams.get("view");
+
   return (
-    <LiveViewerClient
+    <LiveViewerSwitch
+      viewMode={viewMode}
       auction={auction}
       guest={guest}
       bidderRequirement={bidderRequirement}

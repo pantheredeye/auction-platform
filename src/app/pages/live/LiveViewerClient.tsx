@@ -61,7 +61,7 @@ export interface ExistingRegistration {
   userEmail?: string | null;
 }
 
-interface LiveViewerClientProps {
+export interface LiveViewerClientProps {
   auction: LiveAuctionData;
   guest: GuestInfo | null;
   bidderRequirement: string;
