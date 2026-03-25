@@ -1,8 +1,9 @@
 import { useRef, useEffect, useCallback } from "react";
+import type { ServerMessage } from "@/auction/types";
 
 interface UseAuctionWebSocketOptions {
   auctionId: string;
-  onMessage: (msg: unknown) => void;
+  onMessage: (msg: ServerMessage) => void;
   reconnectTrigger: number;
 }
 
@@ -35,7 +36,7 @@ export function useAuctionWebSocket({ auctionId, onMessage, reconnectTrigger }: 
 
       ws.onmessage = (event) => {
         try {
-          const msg = JSON.parse(event.data);
+          const msg = JSON.parse(event.data) as ServerMessage;
           onMessage(msg);
         } catch {
           // ignore malformed

@@ -1,5 +1,5 @@
 import { useCallback } from "react";
-import type { ServerMessage, AuctionStatus } from "@/auction/types";
+import type { ServerMessage, AuctionStatus, LotStatus, ChatMessage } from "@/auction/types";
 import type { StreamStatus } from "./useStreamStatus";
 
 interface DispatchDeps {
@@ -8,7 +8,7 @@ interface DispatchDeps {
   handleViewerCount: (count: number) => void;
   handleLotUpdate: (
     lotId: string,
-    status: string,
+    status: LotStatus,
     currentBidCents: number | null,
     currentBidderId: string | null,
     currentBidderName: string | null,
@@ -24,8 +24,8 @@ interface DispatchDeps {
   pcRef: React.RefObject<RTCPeerConnection | null>;
 
   // Chat
-  handleChatHistory: (messages: unknown[]) => void;
-  handleChatMessage: (msg: unknown) => void;
+  handleChatHistory: (messages: ChatMessage[]) => void;
+  handleChatMessage: (msg: ChatMessage) => void;
 
   // Bidding
   handleBidAccepted: (amountCents: number) => void;
