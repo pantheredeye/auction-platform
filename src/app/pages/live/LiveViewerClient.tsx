@@ -1,16 +1,19 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback } from "react";
-import type { ServerMessage, AuctionStatus, ChatMessage } from "@/auction/types";
+import type { AuctionStatus, ChatMessage } from "@/auction/types";
 import { nanoid } from "nanoid";
-import { toast } from "sonner";
 import { formatCents, dollarsToCents } from "@/lib/money";
 import { RegistrationPanel } from "./RegistrationPanel";
 import { StreamSlate } from "./StreamSlate";
 import { useStreamStatus, formatTime } from "./hooks/useStreamStatus";
 import { useWhepConnection } from "./hooks/useWhepConnection";
 import { useAuctionWebSocket } from "./hooks/useAuctionWebSocket";
-import type { StreamStatus, CurrentLotData } from "./hooks/useStreamStatus";
+import { useChat } from "./hooks/useChat";
+import { useBidding } from "./hooks/useBidding";
+import { useRegistration } from "./hooks/useRegistration";
+import { useServerMessageDispatch } from "./hooks/useServerMessageDispatch";
+import type { CurrentLotData } from "./hooks/useStreamStatus";
 
 export interface LiveAuctionData {
   id: string;
@@ -423,12 +426,6 @@ function BidInput({
 }
 
 export function LiveViewerClient({ auction, guest: initialGuest, bidderRequirement, existingRegistration }: LiveViewerClientProps) {
-  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
-  const [guest, setGuest] = useState<GuestInfo | null>(initialGuest);
-  const [bidMode, setBidMode] = useState(false);
-  const [confirmingBidCents, setConfirmingBidCents] = useState<number | null>(null);
-
-  // Incrementing this forces the WS effect to re-run (close + reconnect)
   const [wsReconnectTrigger, setWsReconnectTrigger] = useState(0);
 
   // ─── Connection hooks ──────────────────────────────────────────
@@ -449,7 +446,6 @@ export function LiveViewerClient({ auction, guest: initialGuest, bidderRequireme
     toggleMute,
     streamStale,
     setStreamStale,
-    cleanupWhep,
     retry,
     whepConnectedRef,
     reconnectAttempt,
@@ -461,87 +457,47 @@ export function LiveViewerClient({ auction, guest: initialGuest, bidderRequireme
     setStreamStatus,
   });
 
-  // ─── WS message handler ──────────────────────────────────────────
+  // ─── Interaction hooks ──────────────────────────────────────────
 
-  const [showRegistration, setShowRegistration] = useState(false);
+  const { chatMessages, handleChatHistory, handleChatMessage } = useChat();
 
-  const handleServerMessage = useCallback((msg: ServerMessage) => {
-    switch (msg.type) {
-      case "auction_update": {
-        const status = msg.status as AuctionStatus;
-        handleAuctionUpdate(status, whepConnectedRef.current);
-        // Stream just became available — reset WHEP reconnect counter so next attempt succeeds
-        if (status === "live" && !whepConnectedRef.current) {
-          reconnectAttempt.current = 0;
-        }
-        break;
-      }
-      case "stream_ended": {
-        setStreamStatus("ended");
-        // Stop reconnection + close WHEP
-        if (reconnectTimer.current) {
-          clearTimeout(reconnectTimer.current);
-          reconnectTimer.current = null;
-        }
-        if (pcRef.current) {
-          pcRef.current.close();
-          pcRef.current = null;
-        }
-        whepConnectedRef.current = false;
-        break;
-      }
-      case "viewer_count":
-        handleViewerCount(msg.count);
-        break;
-      case "lot_update": {
-        handleLotUpdate(
-          msg.lotId,
-          msg.status,
-          msg.currentBidCents ?? null,
-          msg.currentBidderId ?? null,
-          msg.currentBidderName ?? null,
-          msg.bidCount,
-          () => setBidMode(false),
-        );
-        break;
-      }
-      case "chat_history":
-        setChatMessages(msg.messages);
-        break;
-      case "chat_message":
-        setChatMessages((prev) => {
-          if (prev.some((m) => m.id === msg.id)) return prev;
-          return [...prev, msg];
-        });
-        break;
-      case "stream_paused":
-        setStreamStale(true);
-        break;
-      case "bid_accepted":
-        toast.success(`Your bid of ${formatCents(msg.amountCents)} was placed!`);
-        navigator.vibrate?.(10);
-        setBidMode(false);
-        setConfirmingBidCents(null);
-        break;
-      case "bid_rejected":
-        toast.error(msg.reason);
-        setConfirmingBidCents(null);
-        break;
-      case "registration_required":
-        setShowRegistration(true);
-        break;
-      case "pong":
-        break;
-    }
-  }, [handleAuctionUpdate, handleLotUpdate, handleViewerCount, whepConnectedRef, reconnectAttempt, reconnectTimer, pcRef, setStreamStatus, setStreamStale]);
+  const bidding = useBidding(currentLot);
+
+  const {
+    guest,
+    showRegistration,
+    registrationComplete,
+    handleRegistrationGate,
+    handleRegistrationComplete,
+    openRegistration,
+    closeRegistration,
+  } = useRegistration(initialGuest, existingRegistration, bidderRequirement, setWsReconnectTrigger);
+
+  // ─── Orchestration: message dispatch → WS ──────────────────────
+
+  const { handleServerMessage } = useServerMessageDispatch({
+    handleAuctionUpdate,
+    handleViewerCount,
+    handleLotUpdate,
+    setStreamStatus,
+    whepConnectedRef,
+    reconnectAttempt,
+    reconnectTimer,
+    pcRef,
+    handleChatHistory,
+    handleChatMessage,
+    handleBidAccepted: bidding.handleBidAccepted,
+    handleBidRejected: bidding.handleBidRejected,
+    setBidMode: bidding.setBidMode,
+    setStreamStale,
+    openRegistration,
+  });
 
   const { send } = useAuctionWebSocket({
     auctionId: auction.id,
     onMessage: handleServerMessage,
     reconnectTrigger: wsReconnectTrigger,
   });
-
-  // ─── Chat & bidding handlers ──────────────────────────────────────
 
   const sendChatMessage = useCallback((content: string) => {
     send({ type: "chat", content });
@@ -555,44 +511,12 @@ export function LiveViewerClient({ auction, guest: initialGuest, bidderRequireme
       amountCents,
       idempotencyKey: nanoid(),
     });
-    setConfirmingBidCents(null);
-    setBidMode(false);
-  }, [currentLot, send]);
-
-  const handleBidSubmit = useCallback((amountCents: number) => {
-    setConfirmingBidCents(amountCents);
-  }, []);
-
-  const handleBidCancel = useCallback(() => {
-    setConfirmingBidCents(null);
-  }, []);
-
-  const handleBidTap = useCallback(() => {
-    if (currentLot) setBidMode(true);
-  }, [currentLot]);
-
-  const [registrationComplete, setRegistrationComplete] = useState(() => {
-    if (!existingRegistration?.registered) return false;
-    return existingRegistration.hasCard || bidderRequirement !== "card_on_file";
-  });
-
-  const handleRegistrationGate = useCallback(() => {
-    if (!registrationComplete) {
-      setShowRegistration(true);
-    }
-  }, [registrationComplete]);
-
-  const handleRegistrationComplete = useCallback(async (reg: { userId?: string; name: string; hasCard: boolean }) => {
-    setGuest((prev) => prev ? { ...prev, name: reg.name } : prev);
-    setRegistrationComplete(true);
-    setShowRegistration(false);
-    // Force WS reconnect so new connection includes updated cookies
-    setWsReconnectTrigger((n) => n + 1);
-  }, []);
+    bidding.clearBidState();
+  }, [currentLot, send, bidding.clearBidState]);
 
   return (
     <div className="flex flex-col md:flex-row min-h-dvh bg-black">
-      {/* Video section: flex-1 on mobile (top), 70% on desktop (left) */}
+      {/* Video section */}
       <div className="flex flex-col flex-1 md:flex-none md:w-[70%]">
         <div className="relative flex-1 bg-black">
           <video
@@ -646,9 +570,8 @@ export function LiveViewerClient({ auction, guest: initialGuest, bidderRequireme
         </div>
       </div>
 
-      {/* Chat column: banner + chat panel */}
+      {/* Chat column */}
       <div className="flex flex-col shrink-0 h-[40dvh] md:h-auto md:flex-1">
-        {/* Pre-registration banner */}
         {bidderRequirement !== "guest" && !registrationComplete && (
           <div className="shrink-0 bg-zinc-800/90 border-b border-zinc-700 px-4 py-2 flex items-center justify-between gap-3">
             <p className="text-sm text-zinc-300">
@@ -656,7 +579,7 @@ export function LiveViewerClient({ auction, guest: initialGuest, bidderRequireme
             </p>
             <button
               type="button"
-              onClick={() => setShowRegistration(true)}
+              onClick={openRegistration}
               className="shrink-0 h-10 min-w-[5rem] px-4 rounded-lg bg-white text-black text-sm font-semibold cursor-pointer hover:bg-zinc-200 transition-colors"
             >
               Register
@@ -671,18 +594,18 @@ export function LiveViewerClient({ auction, guest: initialGuest, bidderRequireme
           onRegistrationGate={handleRegistrationGate}
           registrationComplete={registrationComplete}
           currentLot={currentLot}
-          onBidTap={handleBidTap}
-          bidInputElement={bidMode && currentLot ? (
+          onBidTap={bidding.handleBidTap}
+          bidInputElement={bidding.bidMode && currentLot ? (
             <BidInput
               currentLot={currentLot}
               auction={auction}
-              onSubmit={handleBidSubmit}
-              onCancel={() => setBidMode(false)}
+              onSubmit={bidding.handleBidSubmit}
+              onCancel={bidding.cancelBidMode}
             />
           ) : undefined}
-          confirmingBidCents={confirmingBidCents}
+          confirmingBidCents={bidding.confirmingBidCents}
           onConfirmBid={sendBid}
-          onCancelConfirm={handleBidCancel}
+          onCancelConfirm={bidding.handleBidCancel}
         />
       </div>
 
@@ -690,7 +613,7 @@ export function LiveViewerClient({ auction, guest: initialGuest, bidderRequireme
         <RegistrationPanel
           requirement={bidderRequirement as "guest" | "registered" | "card_on_file"}
           onComplete={handleRegistrationComplete}
-          onCancel={() => setShowRegistration(false)}
+          onCancel={closeRegistration}
           guestId={guest.id}
         />
       )}
