@@ -5,7 +5,7 @@ export async function verifyTurnstile(
   ip?: string,
 ): Promise<boolean> {
   const secretKey = (env as any).TURNSTILE_SECRET_KEY;
-  if (!secretKey) return true; // Skip verification if no key configured
+  if (!secretKey) return false; // Fail-secure: reject if Turnstile not configured
 
   const formData = new URLSearchParams();
   formData.append("secret", secretKey);

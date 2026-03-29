@@ -22,6 +22,7 @@ export function LiveViewerOverlayClient({
   guest: initialGuest,
   bidderRequirement,
   existingRegistration,
+  isTestMode,
 }: LiveViewerClientProps) {
   const [wsReconnectTrigger, setWsReconnectTrigger] = useState(0);
 
@@ -115,6 +116,11 @@ export function LiveViewerOverlayClient({
 
   return (
     <div className="relative w-full h-dvh bg-black overflow-hidden">
+      {isTestMode && (
+        <div className="absolute top-0 left-0 right-0 bg-amber-500 text-black text-center text-sm font-semibold py-1 z-50">
+          TEST MODE — bids are not real
+        </div>
+      )}
       {/* Video — base layer */}
       <video
         ref={videoRef}
@@ -154,6 +160,7 @@ export function LiveViewerOverlayClient({
         streamStatus={streamStatus}
         viewerCount={viewerCount}
         auctionTitle={auction.title}
+        isTestMode={isTestMode}
       />
 
       {/* OverlayBidBar — z-20 */}

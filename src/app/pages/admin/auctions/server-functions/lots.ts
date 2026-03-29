@@ -3,6 +3,8 @@ import { db } from "@/db";
 import { sql } from "kysely";
 import { requestInfo } from "rwsdk/worker";
 import { logAudit } from "@/lib/audit";
+import { escapeLike } from "@/lib/sql";
+import { assertPositiveInt, assertEnum } from "@/lib/validate";
 
 export async function listLots(auctionId: string) {
   const { ctx } = requestInfo;
@@ -87,6 +89,12 @@ export async function createLot(
     .executeTakeFirst();
 
   if (!auction) throw new Error("Auction not found");
+
+  // Validate numeric inputs
+  assertPositiveInt(data.startingPriceCents, "startingPriceCents");
+  if (data.quantity != null) assertPositiveInt(data.quantity, "quantity");
+  if (data.incrementCents != null) assertPositiveInt(data.incrementCents, "incrementCents");
+  if (data.saleMode) assertEnum(data.saleMode, ["english", "buy_now", "claim"] as const, "saleMode");
 
   // Get next lot number
   const maxLot = await db
@@ -284,6 +292,21 @@ export async function addLotItem(
   const { ctx } = requestInfo;
   const orgId = ctx.currentOrganization!.id;
 
+  // Verify lot belongs to current org and auction is in editable state
+  const lot = await db
+    .selectFrom("lots")
+    .innerJoin("auctions", "auctions.id", "lots.auctionId")
+    .select(["lots.id", "auctions.status as auctionStatus", "auctions.organizationId"])
+    .where("lots.id", "=", lotId)
+    .executeTakeFirst();
+
+  if (!lot || lot.organizationId !== orgId) {
+    throw new Error("Lot not found");
+  }
+  if (!["draft", "scheduled"].includes(lot.auctionStatus)) {
+    throw new Error("Cannot modify lots on a live or completed auction");
+  }
+
   // Get max sortOrder
   const maxSort = await db
     .selectFrom("lot_items")
@@ -318,13 +341,13 @@ export async function addLotItem(
     .catch(() => {});
 
   // Auto-inherit thumbnail if lot has no image
-  const lot = await db
+  const lotForThumb = await db
     .selectFrom("lots")
     .select("thumbnailUrl")
     .where("id", "=", lotId)
     .executeTakeFirst();
 
-  if (!lot?.thumbnailUrl) {
+  if (!lotForThumb?.thumbnailUrl) {
     const product = await db
       .selectFrom("products")
       .select("thumbnailUrl")
@@ -398,8 +421,8 @@ export async function searchProducts(query: string, limit: number = 10) {
     .where("quantityAvailable", ">", 0)
     .where((eb) =>
       eb.or([
-        eb("title", "like", `%${query}%`),
-        eb("sku", "like", `%${query}%`),
+        eb("title", "like", `%${escapeLike(query)}%`),
+        eb("sku", "like", `%${escapeLike(query)}%`),
       ]),
     )
     .orderBy("title", "asc")

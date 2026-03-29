@@ -80,9 +80,15 @@ export class AuctionRoomDO extends DurableObject<Cloudflare.Env> {
     const method = request.method;
 
     if (method === "POST" && url.pathname === "/init") {
+      if (request.headers.get("X-DO-Secret") !== this.env.AUTH_SECRET_KEY) {
+        return new Response("Forbidden", { status: 403 });
+      }
       return this.handleInit(request);
     }
     if (method === "POST" && url.pathname === "/add-lot") {
+      if (request.headers.get("X-DO-Secret") !== this.env.AUTH_SECRET_KEY) {
+        return new Response("Forbidden", { status: 403 });
+      }
       return this.handleAddLot(request);
     }
     if (method === "GET" && request.headers.get("Upgrade") === "websocket") {
@@ -670,8 +676,12 @@ export class AuctionRoomDO extends DurableObject<Cloudflare.Env> {
     }
     this.chatRateLimits.set(userId, now);
 
-    // Truncate content to 500 chars
-    const content = msg.content.slice(0, 500);
+    // Sanitize: strip control chars, truncate to 500
+    const content = msg.content.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "").trim().slice(0, 500);
+    if (!content) {
+      this.sendToSocket(ws, { type: "error", message: "Empty message" });
+      return;
+    }
 
     const chatEvent: BufferedChatEvent = {
       id: crypto.randomUUID(),
@@ -829,6 +839,7 @@ export class AuctionRoomDO extends DurableObject<Cloudflare.Env> {
           updatedAt: new Date().toISOString(),
         })
         .where("id", "=", lotId)
+        .where("auctionId", "=", this.state.auctionId)
         .execute();
     }
 
@@ -918,6 +929,7 @@ export class AuctionRoomDO extends DurableObject<Cloudflare.Env> {
         updatedAt: new Date().toISOString(),
       })
       .where("id", "=", this.state.auctionId)
+      .where("organizationId", "=", this.state.organizationId)
       .execute();
 
     this.state.status = "live";
@@ -953,6 +965,7 @@ export class AuctionRoomDO extends DurableObject<Cloudflare.Env> {
         updatedAt: new Date().toISOString(),
       })
       .where("id", "=", this.state.auctionId)
+      .where("organizationId", "=", this.state.organizationId)
       .execute();
 
     this.state.status = "closed";
@@ -1110,6 +1123,7 @@ export class AuctionRoomDO extends DurableObject<Cloudflare.Env> {
         updatedAt: new Date().toISOString(),
       })
       .where("id", "=", lotId)
+      .where("auctionId", "=", this.state.auctionId)
       .execute();
 
     await this.persistState();

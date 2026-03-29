@@ -3,6 +3,7 @@ import { env } from "cloudflare:workers";
 import { db } from "@/db";
 import { getStripe } from "@/stripe/client";
 import { requestInfo } from "rwsdk/worker";
+import { verifyTurnstile } from "@/lib/turnstile";
 
 export const CURRENT_PLATFORM_TERMS_VERSION = "2026-03-01";
 
@@ -11,15 +12,24 @@ export async function createBidder({
   email,
   guestId,
   acceptedTermsVersion,
+  turnstileToken,
 }: {
   name: string;
   email: string;
   guestId: string;
   acceptedTermsVersion?: string;
+  turnstileToken?: string;
 }): Promise<{ userId: string; userName: string }> {
   if (!name?.trim()) throw new Error("Name is required");
   if (!email?.trim()) throw new Error("Email is required");
   if (!guestId?.trim()) throw new Error("Guest ID is required");
+
+  // Verify Turnstile captcha
+  const ip = requestInfo.request.headers.get("CF-Connecting-IP") ?? undefined;
+  if (turnstileToken) {
+    const valid = await verifyTurnstile(turnstileToken, ip);
+    if (!valid) throw new Error("Captcha verification failed");
+  }
 
   const normalizedEmail = email.toLowerCase().trim();
   const trimmedName = name.trim();
@@ -121,18 +131,20 @@ export async function createBidderAndSetupIntent({
   email,
   guestId,
   acceptedTermsVersion,
+  turnstileToken,
 }: {
   name: string;
   email: string;
   guestId: string;
   acceptedTermsVersion?: string;
+  turnstileToken?: string;
 }): Promise<{
   userId: string;
   clientSecret: string;
   publishableKey: string;
 }> {
   // Reuse createBidder for user + bidder_registration creation
-  const { userId } = await createBidder({ name, email, guestId, acceptedTermsVersion });
+  const { userId } = await createBidder({ name, email, guestId, acceptedTermsVersion, turnstileToken });
 
   const stripe = getStripe(env.STRIPE_SECRET_KEY);
   const normalizedEmail = email.toLowerCase().trim();
@@ -180,14 +192,28 @@ export async function createBidderAndSetupIntent({
 
 export async function savePaymentMethod({
   userId,
+  guestId,
   stripePaymentMethodId,
 }: {
   userId: string;
+  guestId: string;
   stripePaymentMethodId: string;
 }): Promise<{ success: true }> {
   if (!userId?.trim()) throw new Error("userId is required");
+  if (!guestId?.trim()) throw new Error("guestId is required");
   if (!stripePaymentMethodId?.trim())
     throw new Error("stripePaymentMethodId is required");
+
+  // Verify the caller owns this userId via bidder_registrations
+  const registration = await db
+    .selectFrom("bidder_registrations")
+    .select("id")
+    .where("guestId", "=", guestId)
+    .where("userId", "=", userId)
+    .executeTakeFirst();
+  if (!registration) {
+    throw new Error("Unauthorized: registration not found for this guest");
+  }
 
   const stripe = getStripe(env.STRIPE_SECRET_KEY);
   const pm = await stripe.paymentMethods.retrieve(stripePaymentMethodId);

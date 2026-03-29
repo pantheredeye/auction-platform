@@ -56,6 +56,7 @@ interface Auction {
   lotCount: number;
   version: number;
   recording_status: string;
+  isTestMode: number;
   createdAt: string;
 }
 
@@ -166,6 +167,10 @@ export function AdminAuctionsClient({
     startTransition(async () => {
       try {
         const result = await quickGoLive();
+        if ("error" in result) {
+          setError(result.error);
+          return;
+        }
         window.location.href = `/admin/auctions/${result.auctionId}/auctioneer`;
       } catch (e: any) {
         setError(e.message);
@@ -209,7 +214,17 @@ export function AdminAuctionsClient({
 
       {error && (
         <Alert variant="destructive" className="mb-4">
-          <AlertDescription>{error}</AlertDescription>
+          <AlertDescription>
+            {error}
+            {error.includes("Settings") && (
+              <>
+                {" "}
+                <a href="/admin/settings" className="underline font-medium">
+                  Go to Settings
+                </a>
+              </>
+            )}
+          </AlertDescription>
         </Alert>
       )}
 
@@ -272,7 +287,14 @@ export function AdminAuctionsClient({
               const transitions = VALID_TRANSITIONS[auction.status] || [];
               return (
                 <TableRow key={auction.id}>
-                  <TableCell className="font-medium">{auction.title}</TableCell>
+                  <TableCell className="font-medium">
+                    {auction.title}
+                    {!!auction.isTestMode && (
+                      <Badge className="ml-2 bg-amber-100 text-amber-700 hover:bg-amber-100 text-[10px] px-1.5 py-0">
+                        TEST
+                      </Badge>
+                    )}
+                  </TableCell>
                   <TableCell>
                     <Badge variant="outline">
                       {TYPE_LABELS[auction.type] ?? auction.type}

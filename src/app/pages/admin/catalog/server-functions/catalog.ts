@@ -4,6 +4,7 @@ import { requestInfo } from "rwsdk/worker";
 import { logAudit } from "@/lib/audit";
 import { encodeCursor, decodeCursor } from "@/lib/pagination";
 import { uploadImage, deleteImage } from "@/lib/r2";
+import { escapeLike } from "@/lib/sql";
 
 export async function listProducts(params: {
   cursor?: string;
@@ -24,10 +25,11 @@ export async function listProducts(params: {
     .where("deletedAt", "is", null);
 
   if (params.search) {
+    const escaped = escapeLike(params.search);
     query = query.where((eb) =>
       eb.or([
-        eb("title", "like", `%${params.search}%`),
-        eb("sku", "like", `%${params.search}%`),
+        eb("title", "like", `%${escaped}%`),
+        eb("sku", "like", `%${escaped}%`),
       ]),
     );
   }

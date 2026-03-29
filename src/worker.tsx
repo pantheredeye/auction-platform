@@ -212,7 +212,7 @@ const app = defineApp([
     // Populate guest identity for /live/* routes when not authenticated
     if (!ctx.user) {
       const url = new URL(request.url);
-      if (url.pathname.startsWith("/live/") || url.pathname.startsWith("/ws/auction/")) {
+      if (url.pathname.startsWith("/live/") || url.pathname.startsWith("/ws/auction/") || url.pathname.startsWith("/play/")) {
         const guest = await getOrCreateGuestId(request);
         ctx.guest = { id: guest.guestId, name: guest.guestName };
         if (guest.setCookieHeader) {

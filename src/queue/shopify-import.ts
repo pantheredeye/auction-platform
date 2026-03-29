@@ -3,14 +3,12 @@ import { D1Dialect } from "kysely-d1";
 import type { AppDatabase } from "@/db";
 import { uploadImage } from "@/lib/r2";
 import { slugify } from "@/lib/slug";
+import { decrypt } from "@/lib/encrypt";
 
 interface ShopifyImportMessage {
   type: "shopify-import";
   jobId: string;
   organizationId: string;
-  shopUrl: string;
-  accessToken: string;
-  collectionId?: string;
 }
 
 interface ShopifyProduct {
@@ -35,9 +33,20 @@ export async function processShopifyImport(
     dialect: new D1Dialect({ database: env.DB }),
   });
 
-  const { jobId, organizationId, shopUrl, accessToken, collectionId } = message;
+  const { jobId, organizationId } = message;
 
   try {
+    // Read encrypted config from DB
+    const job = await db
+      .selectFrom("import_jobs")
+      .select("config")
+      .where("id", "=", jobId)
+      .executeTakeFirstOrThrow();
+
+    const config = JSON.parse(job.config ?? "{}");
+    const shopUrl: string = config.shopUrl;
+    const collectionId: string | undefined = config.collectionId;
+    const accessToken = await decrypt(config.encryptedAccessToken, env.AUTH_SECRET_KEY);
     // Update status to processing
     await db
       .updateTable("import_jobs")

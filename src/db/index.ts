@@ -47,6 +47,7 @@ export interface OrganizationsTable {
   stripeChargesEnabled: number;
   streamGracePeriodSec: number;
   slateImageUrl: string | null;
+  testMode: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -154,6 +155,7 @@ export interface AuctionsTable {
   auctioneerId: string | null;
   createdByUserId: string;
   clonedFromAuctionId: string | null;
+  isTestMode: number;
   createdAt: string;
   updatedAt: string;
   version: number;

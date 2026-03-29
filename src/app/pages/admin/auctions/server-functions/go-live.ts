@@ -3,27 +3,37 @@ import { db } from "@/db";
 import { env } from "cloudflare:workers";
 import { requestInfo } from "rwsdk/worker";
 import { logAudit } from "@/lib/audit";
+import { assertAuctioneerRole } from "@/lib/validate";
 
-async function assertStripeConnect(orgId: string) {
-  if (!env.STRIPE_SECRET_KEY) return; // dev mode — no Stripe configured
+async function checkStripeConnect(
+  orgId: string,
+): Promise<{ error: string | null; testMode: boolean }> {
+  if (!env.STRIPE_SECRET_KEY) return { error: null, testMode: false };
   const org = await db
     .selectFrom("organizations")
-    .select(["stripeChargesEnabled"])
+    .select(["stripeChargesEnabled", "testMode"])
     .where("id", "=", orgId)
     .executeTakeFirstOrThrow();
+  if (org.testMode) return { error: null, testMode: true };
   if (!org.stripeChargesEnabled) {
-    throw new Error(
-      "Stripe Connect required. Set up payments in Organization Settings before going live.",
-    );
+    return {
+      error: "Stripe Connect or Test Mode required. Update Organization Settings before going live.",
+      testMode: false,
+    };
   }
+  return { error: null, testMode: false };
 }
 
-export async function quickGoLive() {
+export async function quickGoLive(): Promise<
+  { auctionId: string } | { error: string }
+> {
   const { ctx } = requestInfo;
+  assertAuctioneerRole(ctx.currentOrganization?.role);
   const orgId = ctx.currentOrganization!.id;
   const userId = ctx.user!.id;
 
-  await assertStripeConnect(orgId);
+  const stripe = await checkStripeConnect(orgId);
+  if (stripe.error) return { error: stripe.error };
 
   const id = crypto.randomUUID();
   const now = new Date();
@@ -53,6 +63,7 @@ export async function quickGoLive() {
       streamUrl: null,
       recording_key: null,
       recording_status: "none",
+      isTestMode: stripe.testMode ? 1 : 0,
       auctioneerId: userId,
       createdByUserId: userId,
       clonedFromAuctionId: null,
@@ -99,6 +110,7 @@ export async function quickGoLive() {
   await stub.fetch(
     new Request("https://do/init", {
       method: "POST",
+      headers: { "X-DO-Secret": env.AUTH_SECRET_KEY },
       body: JSON.stringify({ auctionId: id }),
     }),
   );

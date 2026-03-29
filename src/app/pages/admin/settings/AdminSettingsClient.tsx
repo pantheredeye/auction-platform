@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useTransition } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "@/app/components/ui/button";
 import {
   Card,
@@ -19,7 +19,7 @@ import { Alert, AlertDescription } from "@/app/components/ui/alert";
 import { Badge } from "@/app/components/ui/badge";
 import { Label } from "@/app/components/ui/label";
 import { toast } from "sonner";
-import { updateOrgSettings } from "./server-functions/settings";
+import { updateOrgSettings, updateTestMode } from "./server-functions/settings";
 import {
   startConnectOnboarding,
   refreshConnectStatus,
@@ -52,6 +52,7 @@ interface Settings {
   stripeConnectAccountId: string | null;
   stripeChargesEnabled: number;
   stripeConfigured: boolean;
+  testMode: number;
 }
 
 export function AdminSettingsClient({
@@ -62,13 +63,15 @@ export function AdminSettingsClient({
   const [bidderRequirement, setBidderRequirement] = useState(
     initialSettings.bidderRequirement,
   );
-  const [isPending, startTransition] = useTransition();
+  const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [stripeState, setStripeState] = useState({
     connected: !!initialSettings.stripeConnectAccountId,
     chargesEnabled: !!initialSettings.stripeChargesEnabled,
     configured: initialSettings.stripeConfigured,
   });
+  const [testModeEnabled, setTestModeEnabled] = useState(!!initialSettings.testMode);
+  const [testModePending, setTestModePending] = useState(false);
   const [connectPending, setConnectPending] = useState(false);
 
   useEffect(() => {
@@ -92,16 +95,32 @@ export function AdminSettingsClient({
     }
   }, []);
 
-  function handleSave() {
+  async function handleSave() {
     setError("");
-    startTransition(async () => {
-      try {
-        await updateOrgSettings({ bidderRequirement });
-        toast.success("Settings saved");
-      } catch (e: any) {
-        setError(e.message);
-      }
-    });
+    setSaving(true);
+    try {
+      await updateOrgSettings({ bidderRequirement });
+      toast.success("Settings saved");
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleTestModeToggle() {
+    const next = !testModeEnabled;
+    setTestModePending(true);
+    setError("");
+    try {
+      await updateTestMode(next);
+      setTestModeEnabled(next);
+      toast.success(next ? "Test mode enabled" : "Test mode disabled");
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setTestModePending(false);
+    }
   }
 
   async function handleConnect() {
@@ -175,6 +194,9 @@ export function AdminSettingsClient({
               </p>
             </button>
           ))}
+          <Button onClick={handleSave} disabled={saving}>
+            {saving ? "Saving..." : "Save Bidder Requirement"}
+          </Button>
         </CardContent>
       </Card>
 
@@ -237,11 +259,42 @@ export function AdminSettingsClient({
         </CardContent>
       </Card>
 
-      <div className="mt-4">
-        <Button onClick={handleSave} disabled={isPending}>
-          {isPending ? "Saving..." : "Save"}
-        </Button>
-      </div>
+      <Card className="mt-4">
+        <CardHeader>
+          <CardTitle>Test Mode</CardTitle>
+          <p className="text-sm text-muted-foreground">
+            Go live without Stripe Connect. Auctions created in test mode are
+            clearly marked and won't process payments.
+          </p>
+        </CardHeader>
+        <CardContent>
+          <div className="flex items-center gap-3">
+            <Badge
+              className={
+                testModeEnabled
+                  ? "bg-amber-100 text-amber-700 hover:bg-amber-100"
+                  : ""
+              }
+              variant={testModeEnabled ? "default" : "secondary"}
+            >
+              {testModeEnabled ? "Enabled" : "Disabled"}
+            </Badge>
+            <Button
+              variant={testModeEnabled ? "outline" : "default"}
+              size="sm"
+              onClick={handleTestModeToggle}
+              disabled={testModePending}
+            >
+              {testModePending
+                ? "Saving..."
+                : testModeEnabled
+                  ? "Disable Test Mode"
+                  : "Enable Test Mode"}
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
     </div>
   );
 }

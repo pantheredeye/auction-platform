@@ -22,15 +22,13 @@ export async function checkUsername(username: string) {
   const user = await getUserByUsername(username);
 
   if (!user) {
-    return { exists: false, authMethod: null };
+    return { exists: false };
   }
 
   if (user.authMethod === "bidder") {
     return {
       exists: true,
-      authMethod: "bidder" as const,
-      error:
-        "This account was created for live bidding. Contact support to upgrade to a full account.",
+      isBidder: true,
     };
   }
 
@@ -76,7 +74,7 @@ export async function registerWithPassword(
     challenge: null,
     currentOrganizationId: membership?.orgId || null,
     role: membership?.role || null,
-  });
+  }, { maxAge: true });
 
   return {
     success: true,
@@ -159,7 +157,7 @@ export async function loginWithPassword(
     challenge: null,
     currentOrganizationId: membership?.orgId || null,
     role: membership?.role || null,
-  });
+  }, { maxAge: true });
 
   return {
     success: true,

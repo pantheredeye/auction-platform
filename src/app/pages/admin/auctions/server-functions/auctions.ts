@@ -6,6 +6,8 @@ import { logAudit } from "@/lib/audit";
 import { generateSlug } from "@/lib/slug";
 import { encodeCursor, decodeCursor } from "@/lib/pagination";
 import { assertAuctionTransition } from "@/auction/state-machine";
+import { escapeLike } from "@/lib/sql";
+import { assertPositiveInt, assertRange } from "@/lib/validate";
 import type { AuctionStatus } from "@/auction/types";
 
 export async function listAuctions(params: {
@@ -28,7 +30,7 @@ export async function listAuctions(params: {
   }
 
   if (params.search) {
-    query = query.where("title", "like", `%${params.search}%`);
+    query = query.where("title", "like", `%${escapeLike(params.search)}%`);
   }
 
   if (params.cursor) {
@@ -96,6 +98,9 @@ export async function createAuction(data: {
   const { ctx } = requestInfo;
   const orgId = ctx.currentOrganization!.id;
   const userId = ctx.user!.id;
+  assertPositiveInt(data.defaultIncrementCents, "defaultIncrementCents");
+  if (data.buyerPremiumPct != null) assertRange(data.buyerPremiumPct, 0, 100, "buyerPremiumPct");
+
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
 
@@ -120,6 +125,7 @@ export async function createAuction(data: {
       streamUrl: null,
       recording_key: null,
       recording_status: "none",
+      isTestMode: 0,
       bidderRequirement: data.bidderRequirement ?? null,
       auctioneerId: data.auctioneerId ?? null,
       createdByUserId: userId,
@@ -246,16 +252,18 @@ export async function transitionAuctionStatus(
     toStatus as AuctionStatus,
   );
 
-  // Gate: require Stripe Connect for going live
+  // Gate: require Stripe Connect for going live (unless test mode)
+  let isTestMode = false;
   if (toStatus === "live" && env.STRIPE_SECRET_KEY) {
     const org = await db
       .selectFrom("organizations")
-      .select(["stripeChargesEnabled"])
+      .select(["stripeChargesEnabled", "testMode"])
       .where("id", "=", orgId)
       .executeTakeFirstOrThrow();
-    if (!org.stripeChargesEnabled) {
+    isTestMode = !!org.testMode;
+    if (!org.testMode && !org.stripeChargesEnabled) {
       throw new Error(
-        "Stripe Connect required. Set up payments in Organization Settings before going live.",
+        "Stripe Connect or Test Mode required. Update Organization Settings before going live.",
       );
     }
   }
@@ -268,7 +276,10 @@ export async function transitionAuctionStatus(
     version: (version ?? auction.version) + 1,
   };
 
-  if (toStatus === "live") updates.actualStartAt = now;
+  if (toStatus === "live") {
+    updates.actualStartAt = now;
+    updates.isTestMode = isTestMode ? 1 : 0;
+  }
   if (toStatus === "closed" || toStatus === "settled")
     updates.actualEndAt = now;
 

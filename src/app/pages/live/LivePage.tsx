@@ -71,6 +71,7 @@ export async function LivePage({ ctx, params, request }: RequestInfo) {
       guest={guest}
       bidderRequirement={bidderRequirement}
       existingRegistration={existingRegistration}
+      isTestMode={!!auction.isTestMode}
     />
   );
 }

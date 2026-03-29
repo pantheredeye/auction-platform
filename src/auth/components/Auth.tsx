@@ -68,11 +68,12 @@ export function Auth() {
     try {
       const result = await checkUsername(username);
 
+      if (result.exists && "isBidder" in result && result.isBidder) {
+        setResult({ type: "error", message: "This account was created for live bidding. Contact support to upgrade to a full account." });
+        return;
+      }
       if (result.exists && result.authMethod) {
-        if (result.authMethod === "bidder") {
-          setResult({ type: "error", message: result.error! });
-          return;
-        } else if (result.authMethod === "password") {
+        if (result.authMethod === "password") {
           setState("PASSWORD_LOGIN");
         } else if (result.authMethod === "passkey") {
           setState("PASSKEY_LOGIN");

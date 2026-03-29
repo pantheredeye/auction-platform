@@ -7,14 +7,15 @@ interface OverlayHeaderProps {
   streamStatus: StreamStatus;
   viewerCount: number;
   auctionTitle: string;
+  isTestMode?: boolean;
 }
 
-export function OverlayHeader({ currentLot, streamStatus, viewerCount, auctionTitle }: OverlayHeaderProps) {
+export function OverlayHeader({ currentLot, streamStatus, viewerCount, auctionTitle, isTestMode }: OverlayHeaderProps) {
   const hasActiveLot = currentLot && currentLot.status !== "pending";
 
   return (
     <div
-      className={`fixed top-0 left-0 right-0 z-20 flex items-center justify-between h-12 px-4 md:px-8 pt-[env(safe-area-inset-top)] bg-black/40 backdrop-blur-sm motion-safe:transition-opacity duration-300 ${hasActiveLot ? "opacity-100" : "opacity-0"}`}
+      className={`fixed ${isTestMode ? "top-7" : "top-0"} left-0 right-0 z-20 flex items-center justify-between h-12 px-4 md:px-8 pt-[env(safe-area-inset-top)] bg-black/40 backdrop-blur-sm motion-safe:transition-opacity duration-300 ${hasActiveLot ? "opacity-100" : "opacity-0"}`}
     >
       <span className="text-lg font-semibold text-white truncate mr-4">
         {currentLot ? currentLot.id : auctionTitle}

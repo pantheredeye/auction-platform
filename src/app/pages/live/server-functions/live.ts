@@ -24,6 +24,7 @@ export async function getAuctionBySlug(slug: string) {
       "organizations.name as orgName",
       "organizations.slateImageUrl as orgSlateImageUrl",
       "auctions.bidderRequirement as auctionBidderRequirement",
+      "auctions.isTestMode",
     ])
     .where("auctions.slug", "=", slug)
     .executeTakeFirst();

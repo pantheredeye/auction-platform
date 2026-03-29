@@ -3,9 +3,11 @@ import { env } from "cloudflare:workers";
 import { db } from "@/db";
 import { getStripe } from "@/stripe/client";
 import { requestInfo } from "rwsdk/worker";
+import { assertAdminRole } from "@/lib/validate";
 
 export async function startConnectOnboarding(): Promise<{ url: string }> {
   const { ctx } = requestInfo;
+  assertAdminRole(ctx.currentOrganization?.role);
   const orgId = ctx.currentOrganization!.id;
   const stripe = getStripe(env.STRIPE_SECRET_KEY);
 
@@ -47,6 +49,7 @@ export async function refreshConnectStatus(): Promise<{
   stripeChargesEnabled: boolean;
 }> {
   const { ctx } = requestInfo;
+  assertAdminRole(ctx.currentOrganization?.role);
   const orgId = ctx.currentOrganization!.id;
 
   const org = await db
@@ -78,6 +81,7 @@ export async function refreshConnectStatus(): Promise<{
 
 export async function disconnectStripeConnect(): Promise<{ success: true }> {
   const { ctx } = requestInfo;
+  assertAdminRole(ctx.currentOrganization?.role);
   const orgId = ctx.currentOrganization!.id;
 
   await db
