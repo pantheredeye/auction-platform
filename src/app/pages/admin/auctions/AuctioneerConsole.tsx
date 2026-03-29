@@ -201,6 +201,7 @@ export function AuctioneerConsole({ auction, initialLots }: AuctioneerConsolePro
   const [streamDurationSecs, setStreamDurationSecs] = useState<number>(0);
 
   const [connectedUsers, setConnectedUsers] = useState<ConnectedUserInfo[]>([]);
+  const [usersExpanded, setUsersExpanded] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectAttempt = useRef(0);
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -771,9 +772,13 @@ export function AuctioneerConsole({ auction, initialLots }: AuctioneerConsolePro
             <span className={`inline-block h-2 w-2 rounded-full ${statusDot}`} />
             <span className="hidden sm:inline">{connectionStatus}</span>
           </div>
-          <div className="text-sm text-muted-foreground">
-            {viewerCount} <span className="hidden sm:inline">viewer{viewerCount !== 1 ? "s" : ""}</span>
-          </div>
+          <ConnectedUsersList
+            connectedUsers={connectedUsers}
+            viewerCount={viewerCount}
+            expanded={usersExpanded}
+            onToggle={() => setUsersExpanded((v) => !v)}
+            onClose={() => setUsersExpanded(false)}
+          />
           <Button
             variant="ghost"
             size="icon"
@@ -1992,6 +1997,76 @@ function BidFeedPanel({ entries }: { entries: BidFeedEntry[] }) {
         ))}
         <div ref={bottomRef} />
       </div>
+    </div>
+  );
+}
+
+// ─── Connected Users List ────────────────────────────────────────
+
+const BIDDER_BADGE: Record<string, { label: string; className: string }> = {
+  guest: { label: "Guest", className: "bg-gray-500/15 text-gray-600 dark:text-gray-400" },
+  registered: { label: "Registered", className: "bg-blue-500/15 text-blue-600 dark:text-blue-400" },
+  card_on_file: { label: "Card on file", className: "bg-green-500/15 text-green-600 dark:text-green-400" },
+};
+
+function ConnectedUsersList({
+  connectedUsers,
+  viewerCount,
+  expanded,
+  onToggle,
+  onClose,
+}: {
+  connectedUsers: ConnectedUserInfo[];
+  viewerCount: number;
+  expanded: boolean;
+  onToggle: () => void;
+  onClose: () => void;
+}) {
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!expanded) return;
+    function handleClick(e: MouseEvent) {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        onClose();
+      }
+    }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [expanded, onClose]);
+
+  return (
+    <div className="relative" ref={containerRef}>
+      <button
+        onClick={onToggle}
+        className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors"
+      >
+        {viewerCount} <span className="hidden sm:inline">viewer{viewerCount !== 1 ? "s" : ""}</span>
+        {expanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+      </button>
+      {expanded && (
+        <div className="absolute right-0 top-full mt-1 z-50 w-64 rounded-md border bg-popover p-2 shadow-md">
+          <h3 className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">
+            Connected Users ({connectedUsers.length})
+          </h3>
+          <div className="max-h-64 overflow-y-auto space-y-1">
+            {connectedUsers.length === 0 && (
+              <p className="text-xs text-muted-foreground py-1">No users connected</p>
+            )}
+            {connectedUsers.map((user) => {
+              const badge = BIDDER_BADGE[user.bidderStatus] ?? BIDDER_BADGE.guest;
+              return (
+                <div key={user.userId} className="flex items-center justify-between gap-2 rounded px-2 py-1 text-sm hover:bg-muted/50">
+                  <span className="truncate">{user.username}</span>
+                  <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded shrink-0 ${badge.className}`}>
+                    {badge.label}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
