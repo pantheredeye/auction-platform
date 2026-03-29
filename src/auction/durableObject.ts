@@ -220,6 +220,15 @@ export class AuctionRoomDO extends DurableObject<Cloudflare.Env> {
     this.state.viewerCount = this.getViewerCount();
 
     this.broadcast({ type: "viewer_count", count: this.state.viewerCount });
+
+    // Notify admins when a new non-admin user connects (dedup by first tab)
+    if (!isAdmin && this.ctx.getWebSockets(userId).length === 1) {
+      this.broadcast(
+        { type: "user_joined", user: { userId, username, bidderStatus } },
+        "admin",
+      );
+    }
+
     this.sendStateSnapshot(server);
 
     return new Response(null, { status: 101, webSocket: client });
