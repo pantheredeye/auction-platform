@@ -50,6 +50,12 @@ export interface IncrementRule {
 
 // ─── DO state ───────────────────────────────────────────────────────
 
+export interface ConnectedUserInfo {
+  userId: string;
+  username: string;
+  bidderStatus: BidderRequirement;
+}
+
 export interface ClaimEntry {
   userId: string;
   username: string;
@@ -154,7 +160,10 @@ export type ServerMessage =
   | { type: "stream_ended" }
   | { type: "stream_paused"; reason: string }
   | { type: "error"; message: string }
-  | { type: "registration_required"; requirement: string };
+  | { type: "registration_required"; requirement: string }
+  | { type: "user_list"; users: ConnectedUserInfo[] }
+  | { type: "user_joined"; user: ConnectedUserInfo }
+  | { type: "user_left"; userId: string };
 
 export type AdminMessage =
   | { type: "advance_lot" }
