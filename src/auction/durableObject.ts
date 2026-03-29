@@ -1382,6 +1382,14 @@ export class AuctionRoomDO extends DurableObject<Cloudflare.Env> {
         createdAt: e.createdAt,
       })),
     });
+
+    const attachment = ws.deserializeAttachment() as SocketAttachment | null;
+    if (attachment?.isAdmin) {
+      this.sendToSocket(ws, {
+        type: "user_list",
+        users: this.getConnectedUserList(),
+      });
+    }
   }
 
   // ─── Chat flush alarm ────────────────────────────────────────
