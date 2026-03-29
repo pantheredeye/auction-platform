@@ -690,7 +690,12 @@ export function AuctioneerConsole({ auction, initialLots }: AuctioneerConsolePro
   // ─── Collapsible panels for small screens ─────────────────────
   const [lotsOpen, setLotsOpen] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
+  const [shareOpen, setShareOpen] = useState(true);
   const [liveControlsOpen, setLiveControlsOpen] = useState(false);
+
+  useEffect(() => {
+    if (isStreamingLive) setShareOpen(false);
+  }, [isStreamingLive]);
 
   // ─── Render ─────────────────────────────────────────────────────
 
@@ -1028,40 +1033,51 @@ export function AuctioneerConsole({ auction, initialLots }: AuctioneerConsolePro
             </>
           )}
 
-          {/* Share section */}
-          <div className="rounded-lg border bg-muted/30 p-3 space-y-1.5">
-            <h2 className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Share</h2>
-            <p className="text-sm font-mono break-all select-all">{`${typeof window !== "undefined" ? window.location.origin : ""}/live/${auction.slug}`}</p>
-            <div className="flex justify-center py-2">
-              <QRCodeSVG
-                value={`${typeof window !== "undefined" ? window.location.origin : ""}/live/${auction.slug}`}
-                size={160}
-                level="M"
-                bgColor="#ffffff"
-                fgColor="#000000"
-                className="rounded"
-              />
-            </div>
-            <Button
-              variant="outline"
-              className="w-full min-h-[48px] text-sm font-medium"
-              onClick={async () => {
-                const url = `${window.location.origin}/live/${auction.slug}`;
-                if (navigator.share) {
-                  try {
-                    await navigator.share({ title: auction.title, url });
-                  } catch {
-                    // user cancelled
-                  }
-                } else {
-                  await navigator.clipboard.writeText(url);
-                  toast.success("Link copied to clipboard");
-                }
-              }}
+          {/* Collapsible share on small screens */}
+          <div className="md:hidden">
+            <button
+              onClick={() => setShareOpen(!shareOpen)}
+              className="flex items-center gap-2 w-full text-left text-sm font-medium text-muted-foreground hover:text-foreground py-1"
             >
               <Share2 className="h-4 w-4" />
               Share
-            </Button>
+              {shareOpen ? <ChevronUp className="h-4 w-4 ml-auto" /> : <ChevronDown className="h-4 w-4 ml-auto" />}
+            </button>
+            {shareOpen && (
+              <div className="border rounded-lg p-2 mt-1 space-y-1.5">
+                <p className="text-sm font-mono break-all select-all">{`${typeof window !== "undefined" ? window.location.origin : ""}/live/${auction.slug}`}</p>
+                <div className="flex justify-center py-2">
+                  <QRCodeSVG
+                    value={`${typeof window !== "undefined" ? window.location.origin : ""}/live/${auction.slug}`}
+                    size={120}
+                    level="M"
+                    bgColor="#ffffff"
+                    fgColor="#000000"
+                    className="rounded"
+                  />
+                </div>
+                <Button
+                  variant="outline"
+                  className="w-full min-h-[48px] text-sm font-medium"
+                  onClick={async () => {
+                    const url = `${window.location.origin}/live/${auction.slug}`;
+                    if (navigator.share) {
+                      try {
+                        await navigator.share({ title: auction.title, url });
+                      } catch {
+                        // user cancelled
+                      }
+                    } else {
+                      await navigator.clipboard.writeText(url);
+                      toast.success("Link copied to clipboard");
+                    }
+                  }}
+                >
+                  <Share2 className="h-4 w-4" />
+                  Copy Link
+                </Button>
+              </div>
+            )}
           </div>
 
           {/* Collapsible chat on small screens */}
@@ -1082,8 +1098,54 @@ export function AuctioneerConsole({ auction, initialLots }: AuctioneerConsolePro
           </div>
         </main>
 
-        {/* Right: Chat — visible md+, collapsible on small */}
+        {/* Right: Share + Chat — visible md+, collapsible on small */}
         <aside className="hidden md:block border-l overflow-y-auto p-3">
+          {/* Collapsible Share section */}
+          <div className="pb-3 mb-3 border-b">
+            <button
+              onClick={() => setShareOpen(!shareOpen)}
+              className="flex items-center gap-2 w-full text-left text-xs font-medium text-muted-foreground uppercase tracking-wide hover:text-foreground"
+            >
+              Share
+              {shareOpen ? <ChevronUp className="h-3 w-3 ml-auto" /> : <ChevronDown className="h-3 w-3 ml-auto" />}
+            </button>
+            {shareOpen && (
+              <div className="mt-2 space-y-1.5">
+                <p className="text-sm font-mono break-all select-all">{`${typeof window !== "undefined" ? window.location.origin : ""}/live/${auction.slug}`}</p>
+                <div className="flex justify-center py-2">
+                  <QRCodeSVG
+                    value={`${typeof window !== "undefined" ? window.location.origin : ""}/live/${auction.slug}`}
+                    size={120}
+                    level="M"
+                    bgColor="#ffffff"
+                    fgColor="#000000"
+                    className="rounded"
+                  />
+                </div>
+                <Button
+                  variant="outline"
+                  className="w-full min-h-[48px] text-sm font-medium"
+                  onClick={async () => {
+                    const url = `${window.location.origin}/live/${auction.slug}`;
+                    if (navigator.share) {
+                      try {
+                        await navigator.share({ title: auction.title, url });
+                      } catch {
+                        // user cancelled
+                      }
+                    } else {
+                      await navigator.clipboard.writeText(url);
+                      toast.success("Link copied to clipboard");
+                    }
+                  }}
+                >
+                  <Share2 className="h-4 w-4" />
+                  Copy Link
+                </Button>
+              </div>
+            )}
+          </div>
+
           <h2 className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">Chat</h2>
           {chatPanel}
         </aside>
