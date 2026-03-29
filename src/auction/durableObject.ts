@@ -338,6 +338,11 @@ export class AuctionRoomDO extends DurableObject<Cloudflare.Env> {
     }
     this.state.viewerCount = this.getViewerCount();
     this.broadcast({ type: "viewer_count", count: this.state.viewerCount });
+
+    // Notify admins when a non-admin user fully disconnects (all tabs closed)
+    if (attachment && !attachment.isAdmin && this.ctx.getWebSockets(attachment.userId).length === 0) {
+      this.broadcast({ type: "user_left", userId: attachment.userId }, "admin");
+    }
   }
 
   async webSocketError(ws: WebSocket) {
@@ -349,6 +354,11 @@ export class AuctionRoomDO extends DurableObject<Cloudflare.Env> {
     }
     this.state.viewerCount = this.getViewerCount();
     this.broadcast({ type: "viewer_count", count: this.state.viewerCount });
+
+    // Notify admins when a non-admin user fully disconnects (all tabs closed)
+    if (attachment && !attachment.isAdmin && this.ctx.getWebSockets(attachment.userId).length === 0) {
+      this.broadcast({ type: "user_left", userId: attachment.userId }, "admin");
+    }
   }
 
   async webSocketMessage(ws: WebSocket, message: string | ArrayBuffer) {
