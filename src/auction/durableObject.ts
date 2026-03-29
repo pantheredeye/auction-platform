@@ -8,6 +8,7 @@ import type {
   BufferedBidEvent,
   BufferedChatEvent,
   ClientMessage,
+  ConnectedUserInfo,
   LotState,
   ServerMessage,
   IncrementRule,
@@ -1281,6 +1282,21 @@ export class AuctionRoomDO extends DurableObject<Cloudflare.Env> {
     const all = this.ctx.getWebSockets().length;
     const admin = this.ctx.getWebSockets("admin").length;
     return all - admin;
+  }
+
+  private getConnectedUserList(): ConnectedUserInfo[] {
+    const seen = new Map<string, ConnectedUserInfo>();
+    for (const ws of this.ctx.getWebSockets()) {
+      const attachment = ws.deserializeAttachment() as SocketAttachment | null;
+      if (!attachment || attachment.isAdmin) continue;
+      if (seen.has(attachment.userId)) continue;
+      seen.set(attachment.userId, {
+        userId: attachment.userId,
+        username: attachment.username,
+        bidderStatus: attachment.bidderStatus,
+      });
+    }
+    return Array.from(seen.values());
   }
 
   private broadcastLotUpdate(lot: LotState) {
