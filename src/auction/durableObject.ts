@@ -37,6 +37,14 @@ export interface SocketAttachment {
 
 // ─── Serializable state for ctx.storage ─────────────────────────────
 
+interface StoredChatEvent {
+  id: string;
+  userId: string;
+  username: string;
+  content: string;
+  createdAt: string;
+}
+
 interface StoredState {
   auctionId: string;
   organizationId: string;
@@ -46,6 +54,7 @@ interface StoredState {
   defaultIncrementCents: number;
   incrementRules: IncrementRule[];
   bidderRequirement: BidderRequirement;
+  chatHistory?: StoredChatEvent[];
 }
 
 // ─── Durable Object ─────────────────────────────────────────────────
@@ -725,6 +734,7 @@ export class AuctionRoomDO extends DurableObject<Cloudflare.Env> {
     if (this.chatHistory.length > 50) {
       this.chatHistory.shift();
     }
+    await this.persistState();
 
     this.chatBuffer.push(chatEvent);
     if (this.chatBuffer.length >= 10) {
@@ -1458,6 +1468,13 @@ export class AuctionRoomDO extends DurableObject<Cloudflare.Env> {
       defaultIncrementCents: this.state.defaultIncrementCents,
       incrementRules: this.state.incrementRules,
       bidderRequirement: this.state.bidderRequirement,
+      chatHistory: this.chatHistory.map((e) => ({
+        id: e.id,
+        userId: e.userId,
+        username: e.username,
+        content: e.content,
+        createdAt: e.createdAt,
+      })),
     };
     await this.ctx.storage.put("state", stored);
   }
@@ -1487,6 +1504,10 @@ export class AuctionRoomDO extends DurableObject<Cloudflare.Env> {
         incrementRules: stored.incrementRules,
         bidderRequirement: stored.bidderRequirement ?? "guest",
       };
+      // Restore chat history (added after initial schema, so may be absent)
+      if (stored.chatHistory) {
+        this.chatHistory = stored.chatHistory;
+      }
     }
   }
 }

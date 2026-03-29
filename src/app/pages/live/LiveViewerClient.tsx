@@ -482,7 +482,6 @@ export function LiveViewerClient({ auction, guest: initialGuest, bidderRequireme
     handleLotUpdate,
     setStreamStatus,
     whepConnectedRef,
-    reconnectAttempt,
     reconnectTimer,
     pcRef,
     handleChatHistory,
@@ -492,6 +491,7 @@ export function LiveViewerClient({ auction, guest: initialGuest, bidderRequireme
     setBidMode: bidding.setBidMode,
     setStreamStale,
     openRegistration,
+    retry,
   });
 
   const { send } = useAuctionWebSocket({
@@ -516,7 +516,7 @@ export function LiveViewerClient({ auction, guest: initialGuest, bidderRequireme
   }, [currentLot, send, bidding.clearBidState]);
 
   return (
-    <div className="flex flex-col min-h-dvh bg-black max-w-screen-2xl mx-auto">
+    <div className="flex flex-col min-h-dvh bg-black w-full max-w-screen-2xl mx-auto overflow-x-hidden">
       {isTestMode && (
         <div className="w-full bg-amber-500 text-black text-center text-sm font-semibold py-1 z-50">
           TEST MODE — bids are not real

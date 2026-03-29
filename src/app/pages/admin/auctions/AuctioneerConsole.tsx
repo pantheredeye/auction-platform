@@ -399,39 +399,46 @@ export function AuctioneerConsole({ auction, initialLots }: AuctioneerConsolePro
   const stopStream = useCallback(async () => {
     setIsSaving(true);
     try {
-      // Capture duration before cleanup
+      // 1. Capture duration
       const duration = streamStartedAtRef.current
         ? Math.round((Date.now() - streamStartedAtRef.current) / 1000)
         : 0;
       streamStartedAtRef.current = null;
       setStreamDurationSecs(duration);
 
-      // 1. Stop WHIP stream first
-      await fetch(`/ingest/${auction.id}`, { method: "DELETE" }).catch(() => {});
-      // 2. Close peer connection
-      if (pcRef.current) {
-        pcRef.current.close();
-        pcRef.current = null;
-      }
-      // 3. Finalize recording (waits for chunk uploads, then merges in R2)
-      const result = await stopRecordingForStream();
-      setRecordingResult(result);
-      // Merge is best-effort — failures surface on the recording page with retry
-      await updateRecordingStatus(auction.id, result.success ? "ready" : "failed").catch(console.error);
-
-      // 4. Release camera/mic tracks (turns off LED)
+      // 2. IMMEDIATELY kill camera + transition UI (user sees instant feedback)
       if (mediaStreamRef.current) {
         for (const track of mediaStreamRef.current.getTracks()) track.stop();
         mediaStreamRef.current = null;
         setActiveStream(null);
       }
       if (videoElRef.current) videoElRef.current.srcObject = null;
+      setStreamStatus("ended");
+      setEndDialogOpen(false);
+
+      // 3. Tear down WHIP + peer connection
+      fetch(`/ingest/${auction.id}`, { method: "DELETE" }).catch(() => {});
+      if (pcRef.current) {
+        pcRef.current.close();
+        pcRef.current = null;
+      }
+
+      // 4. Finalize recording (async — UI already transitioned to PostStreamSummary)
+      const result = await stopRecordingForStream();
+      setRecordingResult(result);
+      await updateRecordingStatus(auction.id, result.success ? "ready" : "failed").catch(console.error);
     } finally {
       setIsSaving(false);
-      setEndDialogOpen(false);
-      setStreamStatus("ended");
     }
   }, [auction.id, stopRecordingForStream]);
+
+  // Warn before tab close while recording is being saved
+  useEffect(() => {
+    if (!isSaving) return;
+    const handler = (e: BeforeUnloadEvent) => { e.preventDefault(); };
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, [isSaving]);
 
   // Cleanup camera/stream/recorder on unmount
   useEffect(() => {

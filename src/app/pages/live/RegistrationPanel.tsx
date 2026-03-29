@@ -156,6 +156,7 @@ function RegisteredTier({
           guestId,
           acceptedTermsVersion: CURRENT_PLATFORM_TERMS_VERSION,
         });
+        await setGuestName(trimmedName);
         onComplete({ userId: result.userId, name: result.userName, hasCard: false });
       } catch {
         setServerError("Something went wrong. Please try again.");
@@ -326,6 +327,7 @@ function CardOnFileTier({
           guestId,
           acceptedTermsVersion: CURRENT_PLATFORM_TERMS_VERSION,
         });
+        await setGuestName(trimmedName);
         setStripeData(result);
         setStep("card");
       } catch {

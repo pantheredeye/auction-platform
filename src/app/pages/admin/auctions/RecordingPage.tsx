@@ -17,8 +17,14 @@ export async function RecordingPage({ ctx, params }: RequestInfo) {
     );
   }
 
-  if (auction.recording_status === "failed") {
-    return <RecordingRetry auctionId={auctionId} auctionTitle={auction.title} />;
+  if (auction.recording_status === "failed" || auction.recording_status === "uploading") {
+    return (
+      <RecordingRetry
+        auctionId={auctionId}
+        auctionTitle={auction.title}
+        isUploading={auction.recording_status === "uploading"}
+      />
+    );
   }
 
   if (auction.recording_status !== "ready") {

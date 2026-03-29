@@ -19,7 +19,6 @@ interface DispatchDeps {
 
   // WHEP refs
   whepConnectedRef: React.RefObject<boolean>;
-  reconnectAttempt: React.RefObject<number>;
   reconnectTimer: React.RefObject<ReturnType<typeof setTimeout> | null>;
   pcRef: React.RefObject<RTCPeerConnection | null>;
 
@@ -35,6 +34,9 @@ interface DispatchDeps {
   // Registration
   setStreamStale: (stale: boolean) => void;
   openRegistration: () => void;
+
+  // WHEP reconnect
+  retry: () => void;
 }
 
 export function useServerMessageDispatch(deps: DispatchDeps) {
@@ -44,7 +46,6 @@ export function useServerMessageDispatch(deps: DispatchDeps) {
     handleLotUpdate,
     setStreamStatus,
     whepConnectedRef,
-    reconnectAttempt,
     reconnectTimer,
     pcRef,
     handleChatHistory,
@@ -54,6 +55,7 @@ export function useServerMessageDispatch(deps: DispatchDeps) {
     setBidMode,
     setStreamStale,
     openRegistration,
+    retry,
   } = deps;
 
   const handleServerMessage = useCallback((msg: ServerMessage) => {
@@ -62,7 +64,7 @@ export function useServerMessageDispatch(deps: DispatchDeps) {
         const status = msg.status as AuctionStatus;
         handleAuctionUpdate(status, whepConnectedRef.current);
         if (status === "live" && !whepConnectedRef.current) {
-          reconnectAttempt.current = 0;
+          retry();
         }
         break;
       }
@@ -117,10 +119,10 @@ export function useServerMessageDispatch(deps: DispatchDeps) {
     }
   }, [
     handleAuctionUpdate, handleViewerCount, handleLotUpdate, setStreamStatus,
-    whepConnectedRef, reconnectAttempt, reconnectTimer, pcRef,
+    whepConnectedRef, reconnectTimer, pcRef,
     handleChatHistory, handleChatMessage,
     handleBidAccepted, handleBidRejected, setBidMode,
-    setStreamStale, openRegistration,
+    setStreamStale, openRegistration, retry,
   ]);
 
   return { handleServerMessage };

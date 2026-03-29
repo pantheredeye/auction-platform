@@ -7,9 +7,11 @@ import { updateRecordingStatus } from "./server-functions/auctions";
 export function RecordingRetry({
   auctionId,
   auctionTitle,
+  isUploading = false,
 }: {
   auctionId: string;
   auctionTitle: string;
+  isUploading?: boolean;
 }) {
   const [retrying, setRetrying] = useState(false);
   const [error, setError] = useState(false);
@@ -20,7 +22,6 @@ export function RecordingRetry({
     try {
       const result = await updateRecordingStatus(auctionId, "ready");
       if (result.recording_status === "ready") {
-        // Merge succeeded — reload to show the recording
         window.location.reload();
       } else {
         setError(true);
@@ -36,7 +37,9 @@ export function RecordingRetry({
     <div className="flex flex-col items-center justify-center min-h-screen gap-4">
       <h1 className="text-xl font-semibold">{auctionTitle} — Recording</h1>
       <p className="text-muted-foreground">
-        Recording couldn't be processed.
+        {isUploading
+          ? "Recording is still processing."
+          : "Recording couldn't be processed."}
       </p>
       {error && (
         <p className="text-sm text-destructive">
@@ -44,7 +47,7 @@ export function RecordingRetry({
         </p>
       )}
       <Button onClick={handleRetry} disabled={retrying}>
-        {retrying ? "Processing..." : "Try again"}
+        {retrying ? "Processing..." : isUploading ? "Finish processing" : "Try again"}
       </Button>
     </div>
   );
