@@ -25,6 +25,7 @@ import type {
   LotStatus,
   AuctionStatus,
   SaleMode,
+  ConnectedUserInfo,
 } from "@/auction/types";
 import { formatCents } from "@/lib/money";
 import { imageUrl } from "@/lib/image-url";
@@ -199,6 +200,7 @@ export function AuctioneerConsole({ auction, initialLots }: AuctioneerConsolePro
   const streamStartedAtRef = useRef<number | null>(null);
   const [streamDurationSecs, setStreamDurationSecs] = useState<number>(0);
 
+  const [connectedUsers, setConnectedUsers] = useState<ConnectedUserInfo[]>([]);
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectAttempt = useRef(0);
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -410,10 +412,10 @@ export function AuctioneerConsole({ auction, initialLots }: AuctioneerConsolePro
         pcRef.current.close();
         pcRef.current = null;
       }
-      // 3. Finalize recording (waits for all chunk uploads)
+      // 3. Finalize recording (waits for all chunk uploads, then merges chunks in R2)
       const result = await stopRecordingForStream();
       setRecordingResult(result);
-      updateRecordingStatus(auction.id, result.success ? "ready" : "failed").catch(console.error);
+      await updateRecordingStatus(auction.id, result.success ? "ready" : "failed");
 
       // 4. Release camera/mic tracks (turns off LED)
       if (mediaStreamRef.current) {
@@ -552,6 +554,20 @@ export function AuctioneerConsole({ auction, initialLots }: AuctioneerConsolePro
 
       case "error":
         toast.error(msg.message);
+        break;
+
+      case "user_list":
+        setConnectedUsers(msg.users);
+        break;
+
+      case "user_joined":
+        setConnectedUsers((prev) =>
+          prev.some((u) => u.userId === msg.user.userId) ? prev : [...prev, msg.user]
+        );
+        break;
+
+      case "user_left":
+        setConnectedUsers((prev) => prev.filter((u) => u.userId !== msg.userId));
         break;
 
       case "pong":
