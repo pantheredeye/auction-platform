@@ -172,7 +172,11 @@ function RegisteredTier({
       </h2>
 
       <div className="space-y-2">
+        <label className="text-sm font-medium text-zinc-400" htmlFor="reg-name">
+          Name
+        </label>
         <Input
+          id="reg-name"
           type="text"
           placeholder="Your name"
           value={name}
@@ -193,7 +197,11 @@ function RegisteredTier({
       </div>
 
       <div className="space-y-2">
+        <label className="text-sm font-medium text-zinc-400" htmlFor="reg-email">
+          Email
+        </label>
         <Input
+          id="reg-email"
           type="email"
           placeholder="Email address"
           value={email}
@@ -351,7 +359,11 @@ function CardOnFileTier({
       </h2>
 
       <div className="space-y-2">
+        <label className="text-sm font-medium text-zinc-400" htmlFor="cof-name">
+          Name
+        </label>
         <Input
+          id="cof-name"
           type="text"
           placeholder="Your name"
           value={name}
@@ -372,7 +384,11 @@ function CardOnFileTier({
       </div>
 
       <div className="space-y-2">
+        <label className="text-sm font-medium text-zinc-400" htmlFor="cof-email">
+          Email
+        </label>
         <Input
+          id="cof-email"
           type="email"
           placeholder="Email address"
           value={email}
@@ -472,7 +488,7 @@ function CardStep({
           return;
         }
 
-        await savePaymentMethod({ userId, stripePaymentMethodId: paymentMethodId });
+        await savePaymentMethod({ userId, guestId, stripePaymentMethodId: paymentMethodId });
         onComplete({ userId, name, hasCard: true });
       } catch {
         setError("Something went wrong. Please try again.");
@@ -619,7 +635,11 @@ function GuestTier({
       </h2>
 
       <div className="space-y-2">
+        <label className="text-sm font-medium text-zinc-400" htmlFor="guest-name">
+          Name
+        </label>
         <Input
+          id="guest-name"
           type="text"
           placeholder="Your name"
           value={name}
