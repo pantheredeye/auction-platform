@@ -350,12 +350,70 @@ export async function deleteAuction(id: string) {
   return { success: true };
 }
 
+/**
+ * Merge recording chunks in R2 into a single object using multipart upload.
+ * Streams each chunk directly (R2 read → R2 multipart part) so memory stays O(1).
+ * Chunks are deleted after successful merge.
+ */
+async function mergeRecordingChunks(auctionId: string): Promise<void> {
+  const prefix = `recordings/${auctionId}/`;
+  const listed = await env.IMAGES.list({ prefix });
+  const chunkKeys = listed.objects
+    .map((o: { key: string }) => o.key)
+    .sort((a: string, b: string) => {
+      const idxA = parseInt(a.split("-").pop() ?? "0", 10);
+      const idxB = parseInt(b.split("-").pop() ?? "0", 10);
+      return idxA - idxB;
+    });
+
+  if (chunkKeys.length === 0) return;
+
+  const firstObj = await env.IMAGES.get(chunkKeys[0]);
+  const contentType = firstObj?.httpMetadata?.contentType ?? "video/webm";
+
+  const mergedKey = `recordings/${auctionId}`;
+  const multipart = await env.IMAGES.createMultipartUpload(mergedKey, {
+    httpMetadata: { contentType },
+  });
+
+  try {
+    const uploadedParts: R2UploadedPart[] = [];
+    for (let i = 0; i < chunkKeys.length; i++) {
+      // Re-fetch (firstObj body may already be consumed)
+      const obj = await env.IMAGES.get(chunkKeys[i]);
+      if (obj) {
+        const part = await multipart.uploadPart(i + 1, obj.body);
+        uploadedParts.push(part);
+      }
+    }
+    await multipart.complete(uploadedParts);
+  } catch (err) {
+    await multipart.abort();
+    throw err;
+  }
+
+  // Clean up individual chunks only after successful merge
+  for (const key of chunkKeys) {
+    await env.IMAGES.delete(key);
+  }
+}
+
 export async function updateRecordingStatus(
   auctionId: string,
   status: "recording" | "uploading" | "ready" | "failed",
 ) {
   const { ctx } = requestInfo;
   const orgId = ctx.currentOrganization!.id;
+
+  // When marking "ready", merge R2 chunks via streaming multipart upload
+  if (status === "ready") {
+    try {
+      await mergeRecordingChunks(auctionId);
+    } catch (err) {
+      console.error("Recording merge failed:", err);
+      status = "failed";
+    }
+  }
 
   const result = await db
     .updateTable("auctions")
@@ -369,7 +427,7 @@ export async function updateRecordingStatus(
   }
 
   await logAudit("auction", auctionId, "update", { recording_status: status });
-  return { success: true };
+  return { success: true, recording_status: status };
 }
 
 export async function getChatMessages(auctionId: string) {

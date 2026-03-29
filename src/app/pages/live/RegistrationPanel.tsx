@@ -9,8 +9,9 @@ import {
   createBidder,
   createBidderAndSetupIntent,
   savePaymentMethod,
-  CURRENT_PLATFORM_TERMS_VERSION,
 } from "@/stripe/server-functions/setup";
+
+const CURRENT_PLATFORM_TERMS_VERSION = "2026-03-01";
 import { loadStripe, type Stripe } from "@stripe/stripe-js";
 import {
   Elements,
@@ -344,6 +345,7 @@ function CardOnFileTier({
       >
         <CardStep
           userId={stripeData.userId}
+          guestId={guestId}
           name={name.trim()}
           onComplete={onComplete}
           onBack={() => setStep("info")}
@@ -441,11 +443,13 @@ function CardOnFileTier({
 
 function CardStep({
   userId,
+  guestId,
   name,
   onComplete,
   onBack,
 }: {
   userId: string;
+  guestId: string;
   name: string;
   onComplete: (reg: RegistrationResult) => void;
   onBack: () => void;
@@ -496,7 +500,7 @@ function CardStep({
         setSubmitting(false);
       }
     },
-    [stripe, elements, userId, name, onComplete]
+    [stripe, elements, userId, guestId, name, onComplete]
   );
 
   return (
@@ -560,15 +564,36 @@ function TermsCheckbox({
 }) {
   return (
     <div className="space-y-2">
-      <label className="flex min-h-12 cursor-pointer items-center gap-3">
-        <input
-          type="checkbox"
-          checked={checked}
-          onChange={(e) => onChange(e.target.checked)}
-          className="size-5 shrink-0 accent-white"
-          aria-invalid={!!error}
-          aria-describedby={error ? `${id}-error` : undefined}
-        />
+      <div
+        role="checkbox"
+        aria-checked={checked}
+        aria-invalid={!!error}
+        aria-describedby={error ? `${id}-error` : undefined}
+        tabIndex={0}
+        onClick={() => onChange(!checked)}
+        onKeyDown={(e) => {
+          if (e.key === " " || e.key === "Enter") {
+            e.preventDefault();
+            onChange(!checked);
+          }
+        }}
+        className="flex min-h-12 cursor-pointer items-center gap-3 select-none"
+      >
+        <span
+          className={cn(
+            "flex items-center justify-center size-7 shrink-0 rounded border-2 transition-colors",
+            checked
+              ? "bg-white border-white text-black"
+              : "border-zinc-500 bg-transparent",
+          )}
+          aria-hidden="true"
+        >
+          {checked && (
+            <svg viewBox="0 0 16 16" fill="none" className="size-4">
+              <path d="M3.5 8.5L6.5 11.5L12.5 4.5" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          )}
+        </span>
         <span className="text-base text-zinc-300">
           I agree to the{" "}
           <a
@@ -576,11 +601,12 @@ function TermsCheckbox({
             target="_blank"
             rel="noopener noreferrer"
             className="text-white underline hover:text-zinc-200"
+            onClick={(e) => e.stopPropagation()}
           >
             Terms of Service
           </a>
         </span>
-      </label>
+      </div>
       {error && (
         <p id={`${id}-error`} className="text-sm font-medium text-red-400">
           {error}

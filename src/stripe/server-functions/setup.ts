@@ -5,8 +5,6 @@ import { getStripe } from "@/stripe/client";
 import { requestInfo } from "rwsdk/worker";
 import { verifyTurnstile } from "@/lib/turnstile";
 
-export const CURRENT_PLATFORM_TERMS_VERSION = "2026-03-01";
-
 export async function createBidder({
   name,
   email,

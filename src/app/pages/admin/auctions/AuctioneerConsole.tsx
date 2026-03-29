@@ -413,10 +413,11 @@ export function AuctioneerConsole({ auction, initialLots }: AuctioneerConsolePro
         pcRef.current.close();
         pcRef.current = null;
       }
-      // 3. Finalize recording (waits for all chunk uploads, then merges chunks in R2)
+      // 3. Finalize recording (waits for chunk uploads, then merges in R2)
       const result = await stopRecordingForStream();
       setRecordingResult(result);
-      await updateRecordingStatus(auction.id, result.success ? "ready" : "failed");
+      // Merge is best-effort — failures surface on the recording page with retry
+      await updateRecordingStatus(auction.id, result.success ? "ready" : "failed").catch(console.error);
 
       // 4. Release camera/mic tracks (turns off LED)
       if (mediaStreamRef.current) {
@@ -425,16 +426,6 @@ export function AuctioneerConsole({ auction, initialLots }: AuctioneerConsolePro
         setActiveStream(null);
       }
       if (videoElRef.current) videoElRef.current.srcObject = null;
-
-      if (result.success) {
-        toast.success("Stream ended. Recording saved.");
-      } else {
-        toast.error(
-          result.failedCount === -1
-            ? "Recording failed"
-            : `Recording saved with ${result.failedCount} failed chunk(s)`,
-        );
-      }
     } finally {
       setIsSaving(false);
       setEndDialogOpen(false);

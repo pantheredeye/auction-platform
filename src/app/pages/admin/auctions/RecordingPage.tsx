@@ -1,6 +1,7 @@
 import type { RequestInfo } from "rwsdk/worker";
 import { getAuction, getChatMessages } from "./server-functions/auctions";
 import { RecordingClient } from "./RecordingClient";
+import { RecordingRetry } from "./RecordingRetry";
 
 export async function RecordingPage({ ctx, params }: RequestInfo) {
   const auctionId = params!.id as string;
@@ -14,6 +15,10 @@ export async function RecordingPage({ ctx, params }: RequestInfo) {
         <p className="text-muted-foreground">Auction not found</p>
       </div>
     );
+  }
+
+  if (auction.recording_status === "failed") {
+    return <RecordingRetry auctionId={auctionId} auctionTitle={auction.title} />;
   }
 
   if (auction.recording_status !== "ready") {
