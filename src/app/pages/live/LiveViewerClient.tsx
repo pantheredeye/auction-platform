@@ -66,6 +66,7 @@ export interface LiveViewerClientProps {
   guest: GuestInfo | null;
   bidderRequirement: string;
   existingRegistration: ExistingRegistration | null;
+  isTestMode?: boolean;
 }
 
 // ─── Chat Panel ──────────────────────────────────────────────────────
@@ -425,7 +426,7 @@ function BidInput({
   );
 }
 
-export function LiveViewerClient({ auction, guest: initialGuest, bidderRequirement, existingRegistration }: LiveViewerClientProps) {
+export function LiveViewerClient({ auction, guest: initialGuest, bidderRequirement, existingRegistration, isTestMode }: LiveViewerClientProps) {
   const [wsReconnectTrigger, setWsReconnectTrigger] = useState(0);
 
   // ─── Connection hooks ──────────────────────────────────────────
@@ -515,98 +516,106 @@ export function LiveViewerClient({ auction, guest: initialGuest, bidderRequireme
   }, [currentLot, send, bidding.clearBidState]);
 
   return (
-    <div className="flex flex-col md:flex-row min-h-dvh bg-black">
-      {/* Video section */}
-      <div className="flex flex-col flex-1 md:flex-none md:w-[70%]">
-        <div className="relative flex-1 bg-black">
-          <video
-            ref={videoRef}
-            autoPlay
-            playsInline
-            muted={muted}
-            className="absolute inset-0 w-full h-full object-cover"
-          />
-
-          <StreamSlate
-            streamStatus={streamStatus}
-            streamStale={streamStale}
-            auctionTitle={auction.title}
-            orgName={auction.orgName}
-            slateImageUrl={auction.orgSlateImageUrl}
-            onRetry={retry}
-            onUnmute={toggleMute}
-            muted={muted}
-          />
+    <div className="flex flex-col min-h-dvh bg-black max-w-screen-2xl mx-auto">
+      {isTestMode && (
+        <div className="w-full bg-amber-500 text-black text-center text-sm font-semibold py-1 z-50">
+          TEST MODE — bids are not real
         </div>
+      )}
 
-        {/* Status bar */}
-        <div className="shrink-0 bg-zinc-900 px-4 py-3">
-          <div className="flex items-center justify-between gap-3">
-            <h1 className="text-lg font-semibold text-white truncate">
-              {auction.title}
-            </h1>
-            <div className="flex items-center gap-3 shrink-0">
-              {streamStatus === "live" && (
-                <span className="inline-flex items-center gap-1.5 rounded bg-green-600 px-2.5 py-1 text-sm font-semibold text-white uppercase tracking-wide">
-                  <span className="inline-block h-2 w-2 rounded-full bg-white animate-pulse" aria-hidden="true" />
-                  Live
-                </span>
-              )}
-              {streamStatus === "waiting" && (
-                <span className="text-lg text-zinc-300 font-medium">Starting soon</span>
-              )}
-              {streamStatus === "ended" && (
-                <span className="text-lg text-zinc-400 font-medium">Ended</span>
-              )}
-              {streamStatus === "connecting" && (
-                <span className="text-lg text-zinc-400 font-medium">Connecting…</span>
-              )}
-              {streamStatus === "error" && (
-                <span className="text-lg text-red-400 font-medium">Error</span>
-              )}
-              <span className="text-lg text-zinc-400">{viewerCount} watching</span>
+      <div className="flex flex-col lg:flex-row flex-1 min-h-0">
+        {/* Video section */}
+        <div className="flex flex-col flex-1 min-h-0">
+          <div className="relative flex-1 bg-black">
+            <video
+              ref={videoRef}
+              autoPlay
+              playsInline
+              muted={muted}
+              className="absolute inset-0 w-full h-full object-cover"
+            />
+
+            <StreamSlate
+              streamStatus={streamStatus}
+              streamStale={streamStale}
+              auctionTitle={auction.title}
+              orgName={auction.orgName}
+              slateImageUrl={auction.orgSlateImageUrl}
+              onRetry={retry}
+              onUnmute={toggleMute}
+              muted={muted}
+            />
+          </div>
+
+          {/* Status bar */}
+          <div className="shrink-0 bg-zinc-900 px-4 py-3">
+            <div className="flex items-center justify-between gap-3">
+              <h1 className="text-lg font-semibold text-white truncate">
+                {auction.title}
+              </h1>
+              <div className="flex items-center gap-3 shrink-0">
+                {streamStatus === "live" && (
+                  <span className="inline-flex items-center gap-1.5 rounded bg-green-600 px-2.5 py-1 text-sm font-semibold text-white uppercase tracking-wide">
+                    <span className="inline-block h-2 w-2 rounded-full bg-white animate-pulse" aria-hidden="true" />
+                    Live
+                  </span>
+                )}
+                {streamStatus === "waiting" && (
+                  <span className="text-lg text-zinc-300 font-medium">Starting soon</span>
+                )}
+                {streamStatus === "ended" && (
+                  <span className="text-lg text-zinc-400 font-medium">Ended</span>
+                )}
+                {streamStatus === "connecting" && (
+                  <span className="text-lg text-zinc-400 font-medium">Connecting…</span>
+                )}
+                {streamStatus === "error" && (
+                  <span className="text-lg text-red-400 font-medium">Error</span>
+                )}
+                <span className="text-lg text-zinc-400">{viewerCount} watching</span>
+              </div>
             </div>
           </div>
         </div>
-      </div>
 
-      {/* Chat column */}
-      <div className="flex flex-col shrink-0 h-[40dvh] md:h-auto md:flex-1">
-        {bidderRequirement !== "guest" && !registrationComplete && (
-          <div className="shrink-0 bg-zinc-800/90 border-b border-zinc-700 px-4 py-2 flex items-center justify-between gap-3">
-            <p className="text-sm text-zinc-300">
-              Register now to participate when bidding starts
-            </p>
-            <button
-              type="button"
-              onClick={openRegistration}
-              className="shrink-0 h-10 min-w-[5rem] px-4 rounded-lg bg-white text-black text-sm font-semibold cursor-pointer hover:bg-zinc-200 transition-colors"
-            >
-              Register
-            </button>
-          </div>
-        )}
+        {/* Chat column */}
+        <div className="flex flex-col shrink-0 h-[40dvh] lg:h-auto lg:w-[360px]">
+          {bidderRequirement !== "guest" && !registrationComplete && (
+            <div className="shrink-0 bg-zinc-800/90 border-b border-zinc-700 px-4 py-3 flex flex-col gap-2">
+              <p className="text-sm text-zinc-300">
+                Register now to participate when bidding starts
+              </p>
+              <button
+                type="button"
+                onClick={openRegistration}
+                className="h-10 w-full rounded-lg bg-white text-black text-sm font-semibold cursor-pointer hover:bg-zinc-200 transition-colors"
+              >
+                Register
+              </button>
+            </div>
+          )}
 
-        <ChatPanel
-          messages={chatMessages}
-          guest={guest}
-          onSend={sendChatMessage}
-          onRegistrationGate={handleRegistrationGate}
-          registrationComplete={registrationComplete}
-          currentLot={currentLot}
-          onBidTap={bidding.handleBidTap}
-          bidInputElement={bidding.bidMode && currentLot ? (
-            <BidInput
-              currentLot={currentLot}
-              auction={auction}
-              onSubmit={bidding.handleBidSubmit}
-              onCancel={bidding.cancelBidMode}
-            />
-          ) : undefined}
-          confirmingBidCents={bidding.confirmingBidCents}
-          onConfirmBid={sendBid}
-          onCancelConfirm={bidding.handleBidCancel}
-        />
+          <ChatPanel
+            messages={chatMessages}
+            guest={guest}
+            onSend={sendChatMessage}
+            onRegistrationGate={handleRegistrationGate}
+            registrationComplete={registrationComplete}
+            currentLot={currentLot}
+            onBidTap={bidding.handleBidTap}
+            bidInputElement={bidding.bidMode && currentLot ? (
+              <BidInput
+                currentLot={currentLot}
+                auction={auction}
+                onSubmit={bidding.handleBidSubmit}
+                onCancel={bidding.cancelBidMode}
+              />
+            ) : undefined}
+            confirmingBidCents={bidding.confirmingBidCents}
+            onConfirmBid={sendBid}
+            onCancelConfirm={bidding.handleBidCancel}
+          />
+        </div>
       </div>
 
       {showRegistration && guest && (
