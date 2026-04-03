@@ -21,6 +21,9 @@ declare namespace Cloudflare {
 		BID_EVENTS_QUEUE: Queue;
 		CHAT_EVENTS_QUEUE: Queue;
 		ASSETS: Fetcher;
+		STRIPE_SECRET_KEY: string;
+		STRIPE_WEBHOOK_SECRET: string;
+		AUTH_SECRET_KEY: string;
 	}
 }
 interface Env extends Cloudflare.Env {}

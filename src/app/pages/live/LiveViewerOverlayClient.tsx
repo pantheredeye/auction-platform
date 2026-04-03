@@ -79,7 +79,6 @@ export function LiveViewerOverlayClient({
     handleLotUpdate,
     setStreamStatus,
     whepConnectedRef,
-    reconnectAttempt,
     reconnectTimer,
     pcRef,
     handleChatHistory,
@@ -89,6 +88,7 @@ export function LiveViewerOverlayClient({
     setBidMode: bidding.setBidMode,
     setStreamStale,
     openRegistration,
+    retry,
   });
 
   const { send } = useAuctionWebSocket({

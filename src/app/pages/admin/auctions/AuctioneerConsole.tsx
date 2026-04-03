@@ -30,8 +30,23 @@ import type {
 import { formatCents } from "@/lib/money";
 import { imageUrl } from "@/lib/image-url";
 import { transitionAuctionStatus, updateRecordingStatus } from "./server-functions/auctions";
-import { Volume2, VolumeX, ChevronDown, ChevronUp, MessageSquare, List, Share2, Loader2 } from "lucide-react";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/app/components/ui/select";
+import { Volume2, VolumeX, ChevronDown, ChevronUp, MessageSquare, List, Share2, ExternalLink, Copy, Loader2 } from "lucide-react";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/app/components/ui/tabs";
 import { startRecording, type RecordingHandle } from "@/lib/stream/recording";
+
+// ─── Stream quality presets ──────────────────────────────────────
+const QUALITY_PRESETS = {
+  "720p":  { label: "720p",  width: 1280, height: 720,  frameRate: 30, bitrate: 2_500_000, recBitrate: 3_000_000 },
+  "1080p": { label: "1080p", width: 1920, height: 1080, frameRate: 30, bitrate: 5_000_000, recBitrate: 5_000_000 },
+} as const;
+type QualityKey = keyof typeof QUALITY_PRESETS;
 
 // ─── useAudioLevel hook ──────────────────────────────────────────
 
@@ -179,6 +194,9 @@ export function AuctioneerConsole({ auction, initialLots }: AuctioneerConsolePro
   const pendingAdds = useRef<{ title: string; startingPriceCents: number; saleMode?: SaleMode }[]>([]);
 
   // Stream state
+  const [streamQuality, setStreamQuality] = useState<QualityKey>("1080p");
+  const streamQualityRef = useRef<QualityKey>(streamQuality);
+  streamQualityRef.current = streamQuality;
   const [streamStatus, setStreamStatus] = useState<StreamStatus>("idle");
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [activeStream, setActiveStream] = useState<MediaStream | null>(null);
@@ -256,7 +274,11 @@ export function AuctioneerConsole({ auction, initialLots }: AuctioneerConsolePro
   const startCamera = useCallback(async () => {
     setCameraError(null);
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+      const q = QUALITY_PRESETS[streamQualityRef.current];
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { width: { ideal: q.width }, height: { ideal: q.height }, frameRate: { ideal: q.frameRate } },
+        audio: true,
+      });
       mediaStreamRef.current = stream;
       setActiveStream(stream);
       if (videoElRef.current) {
@@ -298,7 +320,7 @@ export function AuctioneerConsole({ auction, initialLots }: AuctioneerConsolePro
   const startRecordingForStream = useCallback(() => {
     if (!mediaStreamRef.current) return;
     try {
-      const handle = startRecording(mediaStreamRef.current, auction.id);
+      const handle = startRecording(mediaStreamRef.current, auction.id, QUALITY_PRESETS[streamQualityRef.current].recBitrate);
       recordingRef.current = handle;
       setIsRecording(true);
       updateRecordingStatus(auction.id, "recording").catch(console.error);
@@ -339,6 +361,16 @@ export function AuctioneerConsole({ auction, initialLots }: AuctioneerConsolePro
 
       for (const track of mediaStreamRef.current.getTracks()) {
         pc.addTrack(track, mediaStreamRef.current);
+      }
+
+      // Set sender bitrate based on quality preset
+      const videoSender = pc.getSenders().find(s => s.track?.kind === "video");
+      if (videoSender) {
+        const params = videoSender.getParameters();
+        if (params.encodings?.[0]) {
+          params.encodings[0].maxBitrate = QUALITY_PRESETS[streamQualityRef.current].bitrate;
+          await videoSender.setParameters(params);
+        }
       }
 
       const offer = await pc.createOffer();
@@ -689,11 +721,9 @@ export function AuctioneerConsole({ auction, initialLots }: AuctioneerConsolePro
   const [lotsOpen, setLotsOpen] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(true);
+  const [shareViewMode, setShareViewMode] = useState<string>("split");
   const [liveControlsOpen, setLiveControlsOpen] = useState(false);
 
-  useEffect(() => {
-    if (isStreamingLive) setShareOpen(false);
-  }, [isStreamingLive]);
 
   // ─── Render ─────────────────────────────────────────────────────
 
@@ -984,6 +1014,17 @@ export function AuctioneerConsole({ auction, initialLots }: AuctioneerConsolePro
                 connectionStatus={connectionStatus}
                 viewerCount={viewerCount}
                 auctionTitle={auction.title}
+                streamQuality={streamQuality}
+                onQualityChange={(q) => {
+                  setStreamQuality(q);
+                  streamQualityRef.current = q;
+                  // Restart camera with new constraints if previewing
+                  if (streamStatus === "previewing" && mediaStreamRef.current) {
+                    for (const t of mediaStreamRef.current.getTracks()) t.stop();
+                    mediaStreamRef.current = null;
+                    startCamera();
+                  }
+                }}
               />
 
               {currentLotData && currentLotState ? (
@@ -1042,38 +1083,8 @@ export function AuctioneerConsole({ auction, initialLots }: AuctioneerConsolePro
               {shareOpen ? <ChevronUp className="h-4 w-4 ml-auto" /> : <ChevronDown className="h-4 w-4 ml-auto" />}
             </button>
             {shareOpen && (
-              <div className="border rounded-lg p-2 mt-1 space-y-1.5">
-                <p className="text-sm font-mono break-all select-all">{`${typeof window !== "undefined" ? window.location.origin : ""}/live/${auction.slug}`}</p>
-                <div className="flex justify-center py-2">
-                  <QRCodeSVG
-                    value={`${typeof window !== "undefined" ? window.location.origin : ""}/live/${auction.slug}`}
-                    size={120}
-                    level="M"
-                    bgColor="#ffffff"
-                    fgColor="#000000"
-                    className="rounded"
-                  />
-                </div>
-                <Button
-                  variant="outline"
-                  className="w-full min-h-[48px] text-sm font-medium"
-                  onClick={async () => {
-                    const url = `${window.location.origin}/live/${auction.slug}`;
-                    if (navigator.share) {
-                      try {
-                        await navigator.share({ title: auction.title, url });
-                      } catch {
-                        // user cancelled
-                      }
-                    } else {
-                      await navigator.clipboard.writeText(url);
-                      toast.success("Link copied to clipboard");
-                    }
-                  }}
-                >
-                  <Share2 className="h-4 w-4" />
-                  Copy Link
-                </Button>
+              <div className="border rounded-lg p-2 mt-1">
+                <ShareContent slug={auction.slug} title={auction.title} activeView={shareViewMode} onViewChange={setShareViewMode} />
               </div>
             )}
           </div>
@@ -1108,38 +1119,8 @@ export function AuctioneerConsole({ auction, initialLots }: AuctioneerConsolePro
               {shareOpen ? <ChevronUp className="h-3 w-3 ml-auto" /> : <ChevronDown className="h-3 w-3 ml-auto" />}
             </button>
             {shareOpen && (
-              <div className="mt-2 space-y-1.5">
-                <p className="text-sm font-mono break-all select-all">{`${typeof window !== "undefined" ? window.location.origin : ""}/live/${auction.slug}`}</p>
-                <div className="flex justify-center py-2">
-                  <QRCodeSVG
-                    value={`${typeof window !== "undefined" ? window.location.origin : ""}/live/${auction.slug}`}
-                    size={120}
-                    level="M"
-                    bgColor="#ffffff"
-                    fgColor="#000000"
-                    className="rounded"
-                  />
-                </div>
-                <Button
-                  variant="outline"
-                  className="w-full min-h-[48px] text-sm font-medium"
-                  onClick={async () => {
-                    const url = `${window.location.origin}/live/${auction.slug}`;
-                    if (navigator.share) {
-                      try {
-                        await navigator.share({ title: auction.title, url });
-                      } catch {
-                        // user cancelled
-                      }
-                    } else {
-                      await navigator.clipboard.writeText(url);
-                      toast.success("Link copied to clipboard");
-                    }
-                  }}
-                >
-                  <Share2 className="h-4 w-4" />
-                  Copy Link
-                </Button>
+              <div className="mt-2">
+                <ShareContent slug={auction.slug} title={auction.title} activeView={shareViewMode} onViewChange={setShareViewMode} />
               </div>
             )}
           </div>
@@ -1148,6 +1129,88 @@ export function AuctioneerConsole({ auction, initialLots }: AuctioneerConsolePro
           {chatPanel}
         </aside>
       </div>
+    </div>
+  );
+}
+
+// ─── Share Content ──────────────────────────────────────────────────
+
+function ShareContent({ slug, title, activeView, onViewChange }: { slug: string; title: string; activeView: string; onViewChange: (v: string) => void }) {
+  const origin = typeof window !== "undefined" ? window.location.origin : "";
+  const splitUrl = `${origin}/live/${slug}?view=split`;
+  const overlayUrl = `${origin}/live/${slug}?view=overlay`;
+  const activeUrl = activeView === "overlay" ? overlayUrl : splitUrl;
+
+  return (
+    <div className="space-y-2">
+      <Tabs value={activeView} onValueChange={onViewChange}>
+        <TabsList variant="line" className="w-full">
+          <TabsTrigger value="split" className="flex-1 text-xs">Split</TabsTrigger>
+          <TabsTrigger value="overlay" className="flex-1 text-xs">Overlay</TabsTrigger>
+        </TabsList>
+        <TabsContent value="split">
+          <p className="text-xs text-muted-foreground">Video and chat side by side</p>
+        </TabsContent>
+        <TabsContent value="overlay">
+          <p className="text-xs text-muted-foreground">Fullscreen video, chat over stream</p>
+        </TabsContent>
+      </Tabs>
+
+      <p className="text-xs font-mono break-all select-all">{activeUrl}</p>
+
+      <div className="flex justify-center py-1">
+        <QRCodeSVG
+          value={activeUrl}
+          size={100}
+          level="M"
+          bgColor="#ffffff"
+          fgColor="#000000"
+          className="rounded"
+        />
+      </div>
+
+      <Button
+        variant="outline"
+        className="w-full min-h-[48px] text-sm font-medium"
+        onClick={async () => {
+          if (navigator.share) {
+            try {
+              await navigator.share({ title, url: activeUrl });
+            } catch {
+              // user cancelled
+            }
+          } else {
+            await navigator.clipboard.writeText(activeUrl);
+            toast.success("Link copied");
+          }
+        }}
+      >
+        <Share2 className="h-4 w-4" />
+        Copy Link
+      </Button>
+
+      <Button
+        variant="outline"
+        className="w-full min-h-[48px] text-sm font-medium"
+        onClick={async () => {
+          const text = `Split View: ${splitUrl}\nOverlay View: ${overlayUrl}`;
+          await navigator.clipboard.writeText(text);
+          toast.success("Both links copied");
+        }}
+      >
+        <Copy className="h-4 w-4" />
+        Copy Both
+      </Button>
+
+      <a
+        href={activeUrl}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="flex items-center justify-center gap-1 text-xs text-muted-foreground hover:text-foreground min-h-[48px]"
+      >
+        Preview
+        <ExternalLink className="h-3 w-3" />
+      </a>
     </div>
   );
 }
@@ -1807,6 +1870,8 @@ function StreamPanel({
   connectionStatus,
   viewerCount,
   auctionTitle,
+  streamQuality,
+  onQualityChange,
 }: {
   streamStatus: StreamStatus;
   cameraError: string | null;
@@ -1823,6 +1888,8 @@ function StreamPanel({
   connectionStatus: ConnectionStatus;
   viewerCount: number;
   auctionTitle: string;
+  streamQuality: QualityKey;
+  onQualityChange: (q: QualityKey) => void;
 }) {
   const [goLiveOpen, setGoLiveOpen] = useState(false);
   const { label, color } = STREAM_STATUS_LABELS[streamStatus];
@@ -1923,10 +1990,22 @@ function StreamPanel({
           <>
             {/* Enhanced pre-stream checklist */}
             <div className="space-y-2 px-1">
-              {/* Camera */}
+              {/* Camera + quality selector */}
               <div className="flex items-center gap-2 text-sm">
                 <span className="text-green-600 font-medium">✓ Camera</span>
                 {resolution && <span className="text-xs text-muted-foreground">{resolution}</span>}
+                <Select value={streamQuality} onValueChange={(v) => onQualityChange(v as QualityKey)}>
+                  <SelectTrigger className="h-6 w-[80px] text-xs ml-auto">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {(Object.keys(QUALITY_PRESETS) as QualityKey[]).map((key) => (
+                      <SelectItem key={key} value={key} className="text-xs">
+                        {QUALITY_PRESETS[key].label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
               {/* Mic + audio level */}
               <div className="flex items-center gap-2 text-sm">

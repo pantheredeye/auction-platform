@@ -39,6 +39,7 @@ export interface SocketAttachment {
 
 interface StoredChatEvent {
   id: string;
+  auctionId: string;
   userId: string;
   username: string;
   content: string;
@@ -1470,6 +1471,7 @@ export class AuctionRoomDO extends DurableObject<Cloudflare.Env> {
       bidderRequirement: this.state.bidderRequirement,
       chatHistory: this.chatHistory.map((e) => ({
         id: e.id,
+        auctionId: e.auctionId,
         userId: e.userId,
         username: e.username,
         content: e.content,

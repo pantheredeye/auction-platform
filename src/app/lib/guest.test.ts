@@ -48,9 +48,9 @@ function makeRequest(url: string, cookies?: string): Request {
 
 describe("Guest identity flow", () => {
   describe("getOrCreateGuestId", () => {
-    it("generates new guest_id when no cookie present", () => {
+    it("generates new guest_id when no cookie present", async () => {
       const req = makeRequest("https://example.com/live/test-auction");
-      const guest = getOrCreateGuestId(req);
+      const guest = await getOrCreateGuestId(req);
 
       expect(guest.guestId).toBeTruthy();
       expect(guest.guestName).toBeNull();
@@ -60,41 +60,41 @@ describe("Guest identity flow", () => {
       expect(guest.setCookieHeader).toContain("SameSite=Lax");
     });
 
-    it("returns existing guest_id from cookie", () => {
+    it("returns existing guest_id from cookie", async () => {
       const req = makeRequest(
         "https://example.com/live/test-auction",
         "guest_id=existing-123",
       );
-      const guest = getOrCreateGuestId(req);
+      const guest = await getOrCreateGuestId(req);
 
       expect(guest.guestId).toBe("existing-123");
       expect(guest.guestName).toBeNull();
       expect(guest.setCookieHeader).toBeNull(); // no new cookie
     });
 
-    it("returns guest_name from cookie when present", () => {
+    it("returns guest_name from cookie when present", async () => {
       const req = makeRequest(
         "https://example.com/live/test-auction",
         "guest_id=existing-123; guest_name=Alice",
       );
-      const guest = getOrCreateGuestId(req);
+      const guest = await getOrCreateGuestId(req);
 
       expect(guest.guestId).toBe("existing-123");
       expect(guest.guestName).toBe("Alice");
       expect(guest.setCookieHeader).toBeNull();
     });
 
-    it("decodes URL-encoded guest_name", () => {
+    it("decodes URL-encoded guest_name", async () => {
       const req = makeRequest(
         "https://example.com/live/test-auction",
         "guest_id=g1; guest_name=Bob%20Smith",
       );
-      const guest = getOrCreateGuestId(req);
+      const guest = await getOrCreateGuestId(req);
 
       expect(guest.guestName).toBe("Bob Smith");
     });
 
-    it("guest_id stays stable across requests (same cookie reused)", () => {
+    it("guest_id stays stable across requests (same cookie reused)", async () => {
       const req1 = makeRequest(
         "https://example.com/live/test-auction",
         "guest_id=stable-id-456",
@@ -104,14 +104,14 @@ describe("Guest identity flow", () => {
         "guest_id=stable-id-456",
       );
 
-      expect(getOrCreateGuestId(req1).guestId).toBe("stable-id-456");
-      expect(getOrCreateGuestId(req2).guestId).toBe("stable-id-456");
+      expect((await getOrCreateGuestId(req1)).guestId).toBe("stable-id-456");
+      expect((await getOrCreateGuestId(req2)).guestId).toBe("stable-id-456");
     });
   });
 
   describe("WS headers for guest (no name)", () => {
-    it("sets X-Username to 'Guest' when no guest_name", () => {
-      const guest = getOrCreateGuestId(
+    it("sets X-Username to 'Guest' when no guest_name", async () => {
+      const guest = await getOrCreateGuestId(
         makeRequest("https://example.com/ws/auction/a1", "guest_id=g1"),
       );
       const ctx = { user: null, guest: { id: guest.guestId, name: guest.guestName } };
@@ -125,9 +125,9 @@ describe("Guest identity flow", () => {
   });
 
   describe("WS headers for guest (with name)", () => {
-    it("uses real name in X-Username after setGuestName", () => {
+    it("uses real name in X-Username after setGuestName", async () => {
       // After setGuestName, guest_name cookie is set for subsequent requests
-      const guest = getOrCreateGuestId(
+      const guest = await getOrCreateGuestId(
         makeRequest(
           "https://example.com/ws/auction/a1",
           "guest_id=g1; guest_name=Alice",
@@ -187,8 +187,8 @@ describe("Guest identity flow", () => {
   });
 
   describe("DO distinguishes guest vs authenticated", () => {
-    it("parses guest attachment with isGuest=true", () => {
-      const guest = getOrCreateGuestId(
+    it("parses guest attachment with isGuest=true", async () => {
+      const guest = await getOrCreateGuestId(
         makeRequest("https://example.com/ws/auction/a1", "guest_id=g1"),
       );
       const ctx = { user: null, guest: { id: guest.guestId, name: guest.guestName } };
@@ -225,16 +225,16 @@ describe("Guest identity flow", () => {
   });
 
   describe("Full flow: visit -> cookie -> WS -> DO", () => {
-    it("traces guest lifecycle end-to-end", () => {
+    it("traces guest lifecycle end-to-end", async () => {
       // 1. First visit: no cookies, gets new guest_id
-      const firstVisit = getOrCreateGuestId(
+      const firstVisit = await getOrCreateGuestId(
         makeRequest("https://example.com/live/test-auction"),
       );
       expect(firstVisit.setCookieHeader).toBeTruthy();
       const guestId = firstVisit.guestId;
 
       // 2. WS connect with no name -> "Guest"
-      const wsVisit1 = getOrCreateGuestId(
+      const wsVisit1 = await getOrCreateGuestId(
         makeRequest(
           "https://example.com/ws/auction/a1",
           `guest_id=${guestId}`,
@@ -251,7 +251,7 @@ describe("Guest identity flow", () => {
       expect(attach1.userId).toBe(guestId);
 
       // 3. After setGuestName("Alice"), new WS connect uses real name
-      const wsVisit2 = getOrCreateGuestId(
+      const wsVisit2 = await getOrCreateGuestId(
         makeRequest(
           "https://example.com/ws/auction/a1",
           `guest_id=${guestId}; guest_name=Alice`,

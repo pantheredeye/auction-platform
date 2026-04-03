@@ -17,6 +17,7 @@ export default async () => {
       stripeChargesEnabled: 0,
       streamGracePeriodSec: 90,
       slateImageUrl: null,
+      testMode: 0,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     })

@@ -38,6 +38,7 @@ import { Alert, AlertDescription } from "@/app/components/ui/alert";
 import { MoreHorizontal, Plus, Copy, UserPlus, Trash2, Shield } from "lucide-react";
 import {
   listMembers,
+  listInvites,
   updateMemberRole,
   removeMember,
   createInvite,

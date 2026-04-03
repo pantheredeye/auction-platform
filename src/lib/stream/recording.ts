@@ -58,12 +58,13 @@ async function uploadChunk(
 export function startRecording(
   stream: MediaStream,
   auctionId: string,
+  recBitrate = 5_000_000,
 ): RecordingHandle {
   const mimeType = negotiateCodec();
   let chunkIndex = 0;
   const failedChunks: number[] = [];
 
-  const options: MediaRecorderOptions = { videoBitsPerSecond: 2_500_000 };
+  const options: MediaRecorderOptions = { videoBitsPerSecond: recBitrate };
   if (mimeType) {
     options.mimeType = mimeType;
   }
