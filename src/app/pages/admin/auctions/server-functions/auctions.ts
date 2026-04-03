@@ -1,10 +1,13 @@
 "use server";
+import { env } from "cloudflare:workers";
 import { db } from "@/db";
 import { requestInfo } from "rwsdk/worker";
 import { logAudit } from "@/lib/audit";
-import { slugify } from "@/lib/slug";
+import { generateSlug } from "@/lib/slug";
 import { encodeCursor, decodeCursor } from "@/lib/pagination";
 import { assertAuctionTransition } from "@/auction/state-machine";
+import { escapeLike } from "@/lib/sql";
+import { assertPositiveInt, assertRange } from "@/lib/validate";
 import type { AuctionStatus } from "@/auction/types";
 
 export async function listAuctions(params: {
@@ -27,7 +30,7 @@ export async function listAuctions(params: {
   }
 
   if (params.search) {
-    query = query.where("title", "like", `%${params.search}%`);
+    query = query.where("title", "like", `%${escapeLike(params.search)}%`);
   }
 
   if (params.cursor) {
@@ -90,10 +93,14 @@ export async function createAuction(data: {
   buyerPremiumPct?: number;
   extensionSeconds?: number;
   auctioneerId?: string | null;
+  bidderRequirement?: string | null;
 }) {
   const { ctx } = requestInfo;
   const orgId = ctx.currentOrganization!.id;
   const userId = ctx.user!.id;
+  assertPositiveInt(data.defaultIncrementCents, "defaultIncrementCents");
+  if (data.buyerPremiumPct != null) assertRange(data.buyerPremiumPct, 0, 100, "buyerPremiumPct");
+
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
 
@@ -104,7 +111,7 @@ export async function createAuction(data: {
       organizationId: orgId,
       type: data.type,
       title: data.title,
-      slug: slugify(data.title),
+      slug: generateSlug(data.title),
       description: data.description ?? null,
       status: "draft",
       scheduledStartAt: data.scheduledStartAt ?? null,
@@ -116,6 +123,10 @@ export async function createAuction(data: {
       extensionSeconds: data.extensionSeconds ?? 0,
       streamProviderId: null,
       streamUrl: null,
+      recording_key: null,
+      recording_status: "none",
+      isTestMode: 0,
+      bidderRequirement: data.bidderRequirement ?? null,
       auctioneerId: data.auctioneerId ?? null,
       createdByUserId: userId,
       clonedFromAuctionId: null,
@@ -155,6 +166,7 @@ export async function updateAuction(
     buyerPremiumPct?: number;
     extensionSeconds?: number;
     auctioneerId?: string | null;
+    bidderRequirement?: string | null;
   },
   version: number,
 ) {
@@ -182,7 +194,7 @@ export async function updateAuction(
   if (data.type !== undefined) updates.type = data.type;
   if (data.title !== undefined) {
     updates.title = data.title;
-    updates.slug = slugify(data.title);
+    updates.slug = generateSlug(data.title);
   }
   if (data.description !== undefined) updates.description = data.description;
   if (data.scheduledStartAt !== undefined)
@@ -197,6 +209,8 @@ export async function updateAuction(
     updates.extensionSeconds = data.extensionSeconds;
   if (data.auctioneerId !== undefined)
     updates.auctioneerId = data.auctioneerId;
+  if (data.bidderRequirement !== undefined)
+    updates.bidderRequirement = data.bidderRequirement;
 
   const result = await db
     .updateTable("auctions")
@@ -238,6 +252,22 @@ export async function transitionAuctionStatus(
     toStatus as AuctionStatus,
   );
 
+  // Gate: require Stripe Connect for going live (unless test mode)
+  let isTestMode = false;
+  if (toStatus === "live" && env.STRIPE_SECRET_KEY) {
+    const org = await db
+      .selectFrom("organizations")
+      .select(["stripeChargesEnabled", "testMode"])
+      .where("id", "=", orgId)
+      .executeTakeFirstOrThrow();
+    isTestMode = !!org.testMode;
+    if (!org.testMode && !org.stripeChargesEnabled) {
+      throw new Error(
+        "Stripe Connect or Test Mode required. Update Organization Settings before going live.",
+      );
+    }
+  }
+
   const now = new Date().toISOString();
 
   const updates: Record<string, unknown> = {
@@ -246,7 +276,10 @@ export async function transitionAuctionStatus(
     version: (version ?? auction.version) + 1,
   };
 
-  if (toStatus === "live") updates.actualStartAt = now;
+  if (toStatus === "live") {
+    updates.actualStartAt = now;
+    updates.isTestMode = isTestMode ? 1 : 0;
+  }
   if (toStatus === "closed" || toStatus === "settled")
     updates.actualEndAt = now;
 
@@ -315,6 +348,108 @@ export async function deleteAuction(id: string) {
 
   await logAudit("auction", id, "delete");
   return { success: true };
+}
+
+/**
+ * Merge recording chunks in R2 into a single object using multipart upload.
+ * Streams each chunk directly (R2 read → R2 multipart part) so memory stays O(1).
+ * Chunks are deleted after successful merge.
+ */
+async function mergeRecordingChunks(auctionId: string): Promise<void> {
+  const prefix = `recordings/${auctionId}/`;
+  const listed = await env.IMAGES.list({ prefix });
+  const chunkKeys = listed.objects
+    .map((o: { key: string }) => o.key)
+    .sort((a: string, b: string) => {
+      const idxA = parseInt(a.split("-").pop() ?? "0", 10);
+      const idxB = parseInt(b.split("-").pop() ?? "0", 10);
+      return idxA - idxB;
+    });
+
+  if (chunkKeys.length === 0) return;
+
+  const firstObj = await env.IMAGES.get(chunkKeys[0]);
+  const contentType = firstObj?.httpMetadata?.contentType ?? "video/webm";
+
+  const mergedKey = `recordings/${auctionId}`;
+  const multipart = await env.IMAGES.createMultipartUpload(mergedKey, {
+    httpMetadata: { contentType },
+  });
+
+  try {
+    const uploadedParts: R2UploadedPart[] = [];
+    for (let i = 0; i < chunkKeys.length; i++) {
+      // Re-fetch (firstObj body may already be consumed)
+      const obj = await env.IMAGES.get(chunkKeys[i]);
+      if (obj) {
+        const part = await multipart.uploadPart(i + 1, obj.body);
+        uploadedParts.push(part);
+      }
+    }
+    await multipart.complete(uploadedParts);
+  } catch (err) {
+    await multipart.abort();
+    throw err;
+  }
+
+  // Clean up individual chunks only after successful merge
+  for (const key of chunkKeys) {
+    await env.IMAGES.delete(key);
+  }
+}
+
+export async function updateRecordingStatus(
+  auctionId: string,
+  status: "recording" | "uploading" | "ready" | "failed",
+) {
+  const { ctx } = requestInfo;
+  const orgId = ctx.currentOrganization!.id;
+
+  // When marking "ready", merge R2 chunks via streaming multipart upload
+  if (status === "ready") {
+    try {
+      await mergeRecordingChunks(auctionId);
+    } catch (err) {
+      console.error("Recording merge failed:", err);
+      status = "failed";
+    }
+  }
+
+  const result = await db
+    .updateTable("auctions")
+    .set({ recording_status: status, updatedAt: new Date().toISOString() })
+    .where("id", "=", auctionId)
+    .where("organizationId", "=", orgId)
+    .execute();
+
+  if (!result[0]?.numUpdatedRows) {
+    throw new Error("Auction not found");
+  }
+
+  await logAudit("auction", auctionId, "update", { recording_status: status });
+  return { success: true, recording_status: status };
+}
+
+export async function getChatMessages(auctionId: string) {
+  const { ctx } = requestInfo;
+  const orgId = ctx.currentOrganization!.id;
+
+  return db
+    .selectFrom("chat_messages")
+    .innerJoin("users", "users.id", "chat_messages.userId")
+    .select([
+      "chat_messages.id",
+      "chat_messages.content",
+      "chat_messages.type",
+      "chat_messages.createdAt",
+      "users.username",
+      "users.displayName",
+    ])
+    .where("chat_messages.auctionId", "=", auctionId)
+    .where("chat_messages.organizationId", "=", orgId)
+    .where("chat_messages.isModerated", "=", 0)
+    .orderBy("chat_messages.createdAt", "asc")
+    .execute();
 }
 
 export async function listAuctioneers() {

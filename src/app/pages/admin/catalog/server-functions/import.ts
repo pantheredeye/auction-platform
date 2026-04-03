@@ -3,6 +3,7 @@ import { env } from "cloudflare:workers";
 import { db } from "@/db";
 import { requestInfo } from "rwsdk/worker";
 import { logAudit } from "@/lib/audit";
+import { encrypt } from "@/lib/encrypt";
 
 export async function startShopifyImport(data: {
   shopUrl: string;
@@ -15,6 +16,9 @@ export async function startShopifyImport(data: {
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
 
+  // Encrypt access token before storing
+  const encryptedToken = await encrypt(data.accessToken, env.AUTH_SECRET_KEY);
+
   await db
     .insertInto("import_jobs")
     .values({
@@ -26,20 +30,22 @@ export async function startShopifyImport(data: {
       processedItems: 0,
       failedItems: 0,
       errorLog: null,
-      config: JSON.stringify({ shopUrl: data.shopUrl, collectionId: data.collectionId }),
+      config: JSON.stringify({
+        shopUrl: data.shopUrl,
+        collectionId: data.collectionId,
+        encryptedAccessToken: encryptedToken,
+      }),
       createdByUserId: userId,
       createdAt: now,
       updatedAt: now,
     })
     .execute();
 
+  // Only send jobId — consumer reads token from DB
   await env.IMPORT_QUEUE.send({
     type: "shopify-import",
     jobId: id,
     organizationId: orgId,
-    shopUrl: data.shopUrl,
-    accessToken: data.accessToken,
-    collectionId: data.collectionId,
   });
 
   await logAudit("import_job", id, "create", {

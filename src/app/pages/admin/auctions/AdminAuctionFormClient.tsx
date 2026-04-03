@@ -28,6 +28,7 @@ interface Auction {
   incrementRules: string | null;
   buyerPremiumPct: number;
   extensionSeconds: number;
+  bidderRequirement: string | null;
   auctioneerId: string | null;
   version: number;
 }
@@ -98,6 +99,9 @@ export function AdminAuctionFormClient({
   const [auctioneerId, setAuctioneerId] = useState(
     auction?.auctioneerId ?? "",
   );
+  const [bidderRequirement, setBidderRequirement] = useState(
+    auction?.bidderRequirement || "org_default",
+  );
   const [rules, setRules] = useState<IncrementRule[]>(
     parseRules(auction?.incrementRules ?? null),
   );
@@ -156,6 +160,7 @@ export function AdminAuctionFormClient({
           buyerPremiumPct: parseFloat(buyerPremiumPct) || 0,
           extensionSeconds: parseInt(extensionSeconds) || 0,
           auctioneerId: auctioneerId || null,
+          bidderRequirement: bidderRequirement === "org_default" ? null : bidderRequirement,
         };
 
         if (isEdit) {
@@ -307,6 +312,24 @@ export function AdminAuctionFormClient({
                   onChange={(e) => setExtensionSeconds(e.target.value)}
                 />
               </div>
+            </div>
+
+            <div>
+              <Label>Bidder Requirement</Label>
+              <p className="text-xs text-muted-foreground mb-1">
+                Override the org default for this auction, or leave as default.
+              </p>
+              <Select value={bidderRequirement} onValueChange={setBidderRequirement}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="org_default">Org Default</SelectItem>
+                  <SelectItem value="guest">Guest — display name only</SelectItem>
+                  <SelectItem value="registered">Registered — name + email</SelectItem>
+                  <SelectItem value="card_on_file">Card on File — payment card required</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
 
             {/* Increment rules */}

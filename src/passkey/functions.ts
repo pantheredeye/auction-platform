@@ -125,7 +125,7 @@ export async function finishPasskeyRegistration(
     challenge: null,
     currentOrganizationId: membership?.orgId || null,
     role: membership?.role || null,
-  });
+  }, { maxAge: true });
 
   return {
     success: true,
@@ -197,7 +197,7 @@ export async function finishPasskeyLogin(login: AuthenticationResponseJSON) {
     challenge: null,
     currentOrganizationId: membership?.orgId || null,
     role: membership?.role || null,
-  });
+  }, { maxAge: true });
 
   return {
     success: true,

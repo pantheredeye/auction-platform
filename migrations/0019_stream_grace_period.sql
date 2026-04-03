@@ -1,0 +1,1 @@
+ALTER TABLE organizations ADD COLUMN streamGracePeriodSec INTEGER NOT NULL DEFAULT 90;

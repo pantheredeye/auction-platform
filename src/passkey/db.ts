@@ -26,25 +26,8 @@ export async function createUser(
     })
     .execute();
 
-  // Find first org to add user to as consumer
-  const org = await db
-    .selectFrom("organizations")
-    .selectAll()
-    .executeTakeFirst();
-
-  if (org) {
-    await db
-      .insertInto("memberships")
-      .values({
-        id: crypto.randomUUID(),
-        userId: id,
-        organizationId: org.id,
-        role: "consumer",
-        isApproved: 1,
-        createdAt: now,
-      })
-      .execute();
-  }
+  // Note: user must be invited to an org or join via explicit signup flow.
+  // No auto-join to first org — multi-tenant safety.
 
   return { id, username: normalizedUsername, createdAt: now };
 }

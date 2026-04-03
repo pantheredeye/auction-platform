@@ -2,7 +2,7 @@
 import { db } from "@/db";
 import { requestInfo } from "rwsdk/worker";
 import { logAudit } from "@/lib/audit";
-import { slugify } from "@/lib/slug";
+import { generateSlug } from "@/lib/slug";
 
 export async function cloneAuction(sourceId: string) {
   const { ctx } = requestInfo;
@@ -30,7 +30,7 @@ export async function cloneAuction(sourceId: string) {
       organizationId: orgId,
       type: source.type,
       title: newTitle,
-      slug: slugify(newTitle),
+      slug: generateSlug(newTitle),
       description: source.description,
       status: "draft",
       scheduledStartAt: null,
@@ -42,6 +42,9 @@ export async function cloneAuction(sourceId: string) {
       extensionSeconds: source.extensionSeconds,
       streamProviderId: source.streamProviderId,
       streamUrl: null,
+      recording_key: null,
+      recording_status: "none",
+      isTestMode: 0,
       auctioneerId: source.auctioneerId,
       createdByUserId: userId,
       clonedFromAuctionId: sourceId,
@@ -94,6 +97,9 @@ export async function cloneAuction(sourceId: string) {
         bidCount: 0,
         status: "pending",
         quantity: lot.quantity,
+        saleMode: lot.saleMode ?? "english",
+        quantityClaimed: 0,
+        maxClaimsPerUser: lot.maxClaimsPerUser ?? null,
         extensionSeconds: lot.extensionSeconds,
         closesAt: null,
         winnerUserId: null,

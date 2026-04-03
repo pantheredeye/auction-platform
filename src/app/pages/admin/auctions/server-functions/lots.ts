@@ -3,6 +3,8 @@ import { db } from "@/db";
 import { sql } from "kysely";
 import { requestInfo } from "rwsdk/worker";
 import { logAudit } from "@/lib/audit";
+import { escapeLike } from "@/lib/sql";
+import { assertPositiveInt, assertEnum } from "@/lib/validate";
 
 export async function listLots(auctionId: string) {
   const { ctx } = requestInfo;
@@ -71,6 +73,8 @@ export async function createLot(
     incrementCents?: number | null;
     quantity?: number;
     extensionSeconds?: number | null;
+    saleMode?: string;
+    maxClaimsPerUser?: number | null;
   },
 ) {
   const { ctx } = requestInfo;
@@ -85,6 +89,12 @@ export async function createLot(
     .executeTakeFirst();
 
   if (!auction) throw new Error("Auction not found");
+
+  // Validate numeric inputs
+  assertPositiveInt(data.startingPriceCents, "startingPriceCents");
+  if (data.quantity != null) assertPositiveInt(data.quantity, "quantity");
+  if (data.incrementCents != null) assertPositiveInt(data.incrementCents, "incrementCents");
+  if (data.saleMode) assertEnum(data.saleMode, ["english", "buy_now", "claim"] as const, "saleMode");
 
   // Get next lot number
   const maxLot = await db
@@ -115,6 +125,9 @@ export async function createLot(
       bidCount: 0,
       status: "pending",
       quantity: data.quantity ?? 1,
+      saleMode: data.saleMode ?? "english",
+      quantityClaimed: 0,
+      maxClaimsPerUser: data.maxClaimsPerUser ?? null,
       extensionSeconds: data.extensionSeconds ?? null,
       closesAt: null,
       winnerUserId: null,
@@ -147,6 +160,8 @@ export async function updateLot(
     incrementCents?: number | null;
     quantity?: number;
     extensionSeconds?: number | null;
+    saleMode?: string;
+    maxClaimsPerUser?: number | null;
   },
   version: number,
 ) {
@@ -183,6 +198,9 @@ export async function updateLot(
   if (data.incrementCents !== undefined)
     updates.incrementCents = data.incrementCents;
   if (data.quantity !== undefined) updates.quantity = data.quantity;
+  if (data.saleMode !== undefined) updates.saleMode = data.saleMode;
+  if (data.maxClaimsPerUser !== undefined)
+    updates.maxClaimsPerUser = data.maxClaimsPerUser;
   if (data.extensionSeconds !== undefined)
     updates.extensionSeconds = data.extensionSeconds;
 
@@ -274,6 +292,21 @@ export async function addLotItem(
   const { ctx } = requestInfo;
   const orgId = ctx.currentOrganization!.id;
 
+  // Verify lot belongs to current org and auction is in editable state
+  const lot = await db
+    .selectFrom("lots")
+    .innerJoin("auctions", "auctions.id", "lots.auctionId")
+    .select(["lots.id", "auctions.status as auctionStatus", "auctions.organizationId"])
+    .where("lots.id", "=", lotId)
+    .executeTakeFirst();
+
+  if (!lot || lot.organizationId !== orgId) {
+    throw new Error("Lot not found");
+  }
+  if (!["draft", "scheduled"].includes(lot.auctionStatus)) {
+    throw new Error("Cannot modify lots on a live or completed auction");
+  }
+
   // Get max sortOrder
   const maxSort = await db
     .selectFrom("lot_items")
@@ -308,13 +341,13 @@ export async function addLotItem(
     .catch(() => {});
 
   // Auto-inherit thumbnail if lot has no image
-  const lot = await db
+  const lotForThumb = await db
     .selectFrom("lots")
     .select("thumbnailUrl")
     .where("id", "=", lotId)
     .executeTakeFirst();
 
-  if (!lot?.thumbnailUrl) {
+  if (!lotForThumb?.thumbnailUrl) {
     const product = await db
       .selectFrom("products")
       .select("thumbnailUrl")
@@ -335,10 +368,15 @@ export async function addLotItem(
 }
 
 export async function removeLotItem(lotItemId: string) {
+  const { ctx } = requestInfo;
+  const orgId = ctx.currentOrganization!.id;
+
   const item = await db
     .selectFrom("lot_items")
-    .selectAll()
-    .where("id", "=", lotItemId)
+    .innerJoin("lots", "lots.id", "lot_items.lotId")
+    .selectAll("lot_items")
+    .where("lot_items.id", "=", lotItemId)
+    .where("lots.organizationId", "=", orgId)
     .executeTakeFirst();
 
   if (!item) throw new Error("Lot item not found");
@@ -383,8 +421,8 @@ export async function searchProducts(query: string, limit: number = 10) {
     .where("quantityAvailable", ">", 0)
     .where((eb) =>
       eb.or([
-        eb("title", "like", `%${query}%`),
-        eb("sku", "like", `%${query}%`),
+        eb("title", "like", `%${escapeLike(query)}%`),
+        eb("sku", "like", `%${escapeLike(query)}%`),
       ]),
     )
     .orderBy("title", "asc")

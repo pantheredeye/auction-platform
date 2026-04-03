@@ -18,14 +18,27 @@ export const setCommonHeaders =
     response.headers.set("Referrer-Policy", "no-referrer");
 
     // Explicitly disables access to specific browser features/APIs
+    // camera/microphone allowed for self (auctioneer console streaming)
     response.headers.set(
       "Permissions-Policy",
-      "geolocation=(), microphone=(), camera=()",
+      "geolocation=(), microphone=(self), camera=(self)",
     );
 
     // Defines trusted sources for content loading and script execution:
     response.headers.set(
       "Content-Security-Policy",
-      `default-src 'self'; script-src 'self' 'unsafe-eval' 'nonce-${nonce}' https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; frame-ancestors 'self'; frame-src 'self' https://challenges.cloudflare.com https://customer-*.cloudflarestream.com; object-src 'none';`,
+      `default-src 'self'; script-src 'self' 'unsafe-eval' 'nonce-${nonce}' https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; connect-src 'self' wss:; media-src 'self' blob:; frame-ancestors 'self'; frame-src 'self' https://challenges.cloudflare.com; object-src 'none';`,
+    );
+  };
+
+/**
+ * CSP tailored for /live/* routes: WHEP playback + WebSocket, no Turnstile.
+ */
+export const setLiveCSP =
+  (): RouteMiddleware =>
+  ({ response, rw: { nonce } }) => {
+    response.headers.set(
+      "Content-Security-Policy",
+      `default-src 'self'; script-src 'self' 'unsafe-eval' 'nonce-${nonce}' https://js.stripe.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; connect-src 'self' wss: https://api.stripe.com https://r.stripe.com; media-src 'self' blob:; frame-ancestors 'self'; frame-src 'self' https://js.stripe.com; object-src 'none';`,
     );
   };

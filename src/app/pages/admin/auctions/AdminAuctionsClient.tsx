@@ -36,6 +36,8 @@ import {
   Copy,
   Trash2,
   ArrowRight,
+  Radio,
+  Play,
 } from "lucide-react";
 import {
   listAuctions,
@@ -43,6 +45,7 @@ import {
   transitionAuctionStatus,
 } from "./server-functions/auctions";
 import { cloneAuction } from "./server-functions/clone";
+import { quickGoLive } from "./server-functions/go-live";
 
 interface Auction {
   id: string;
@@ -52,6 +55,8 @@ interface Auction {
   scheduledStartAt: string | null;
   lotCount: number;
   version: number;
+  recording_status: string;
+  isTestMode: number;
   createdAt: string;
 }
 
@@ -158,6 +163,21 @@ export function AdminAuctionsClient({
     });
   }
 
+  function handleGoLive() {
+    startTransition(async () => {
+      try {
+        const result = await quickGoLive();
+        if ("error" in result) {
+          setError(result.error);
+          return;
+        }
+        window.location.href = `/admin/auctions/${result.auctionId}/auctioneer`;
+      } catch (e: any) {
+        setError(e.message);
+      }
+    });
+  }
+
   function handleDelete(id: string) {
     if (!confirm("Delete this draft auction?")) return;
     startTransition(async () => {
@@ -174,16 +194,37 @@ export function AdminAuctionsClient({
     <div>
       <div className="flex items-center justify-between mb-4">
         <h1 className="text-2xl font-bold">Auctions</h1>
-        <a href="/admin/auctions/new">
-          <Button size="sm">
-            <Plus size={16} /> New Auction
+        <div className="flex gap-2">
+          <Button
+            size="sm"
+            variant="default"
+            onClick={handleGoLive}
+            disabled={isPending}
+            className="bg-green-600 hover:bg-green-700"
+          >
+            <Radio size={16} /> Go Live Now
           </Button>
-        </a>
+          <a href="/admin/auctions/new">
+            <Button size="sm" variant="outline">
+              <Plus size={16} /> New Auction
+            </Button>
+          </a>
+        </div>
       </div>
 
       {error && (
         <Alert variant="destructive" className="mb-4">
-          <AlertDescription>{error}</AlertDescription>
+          <AlertDescription>
+            {error}
+            {error.includes("Settings") && (
+              <>
+                {" "}
+                <a href="/admin/settings" className="underline font-medium">
+                  Go to Settings
+                </a>
+              </>
+            )}
+          </AlertDescription>
         </Alert>
       )}
 
@@ -230,13 +271,14 @@ export function AdminAuctionsClient({
             <TableHead>Status</TableHead>
             <TableHead>Scheduled</TableHead>
             <TableHead>Lots</TableHead>
+            <TableHead></TableHead>
             <TableHead className="w-[60px]"></TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
           {auctions.length === 0 ? (
             <TableRow>
-              <TableCell colSpan={6} className="text-center text-muted-foreground py-8">
+              <TableCell colSpan={7} className="text-center text-muted-foreground py-8">
                 No auctions found.
               </TableCell>
             </TableRow>
@@ -245,18 +287,39 @@ export function AdminAuctionsClient({
               const transitions = VALID_TRANSITIONS[auction.status] || [];
               return (
                 <TableRow key={auction.id}>
-                  <TableCell className="font-medium">{auction.title}</TableCell>
+                  <TableCell className="font-medium">
+                    {auction.title}
+                    {!!auction.isTestMode && (
+                      <Badge className="ml-2 bg-amber-100 text-amber-700 hover:bg-amber-100 text-[10px] px-1.5 py-0">
+                        TEST
+                      </Badge>
+                    )}
+                  </TableCell>
                   <TableCell>
                     <Badge variant="outline">
                       {TYPE_LABELS[auction.type] ?? auction.type}
                     </Badge>
                   </TableCell>
                   <TableCell>
-                    <span
-                      className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_COLORS[auction.status] ?? ""}`}
-                    >
-                      {auction.status}
-                    </span>
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span
+                        className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_COLORS[auction.status] ?? ""}`}
+                      >
+                        {auction.status}
+                      </span>
+                      {transitions.map((t) => (
+                        <button
+                          key={t}
+                          disabled={isPending}
+                          onClick={() =>
+                            handleTransition(auction.id, t, auction.version)
+                          }
+                          className="inline-flex items-center gap-0.5 rounded-full border px-2 py-0.5 text-[11px] font-medium text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors disabled:opacity-50"
+                        >
+                          → {t}
+                        </button>
+                      ))}
+                    </div>
                   </TableCell>
                   <TableCell className="text-muted-foreground text-sm">
                     {auction.scheduledStartAt
@@ -264,6 +327,22 @@ export function AdminAuctionsClient({
                       : "—"}
                   </TableCell>
                   <TableCell>{auction.lotCount}</TableCell>
+                  <TableCell className="space-x-1">
+                    {(auction.status === "live" || auction.status === "closing") && (
+                      <a href={`/admin/auctions/${auction.id}/auctioneer`}>
+                        <Button size="xs" variant="default" className="bg-green-600 hover:bg-green-700 text-white gap-1">
+                          <Radio size={12} /> Control Room
+                        </Button>
+                      </a>
+                    )}
+                    {auction.recording_status === "ready" && (
+                      <a href={`/admin/auctions/${auction.id}/recording`}>
+                        <Button size="xs" variant="outline" className="gap-1">
+                          <Play size={12} /> View Recording
+                        </Button>
+                      </a>
+                    )}
+                  </TableCell>
                   <TableCell>
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
@@ -287,27 +366,6 @@ export function AdminAuctionsClient({
                         >
                           <Copy size={14} /> Clone
                         </DropdownMenuItem>
-
-                        {transitions.length > 0 && (
-                          <>
-                            <DropdownMenuSeparator />
-                            {transitions.map((t) => (
-                              <DropdownMenuItem
-                                key={t}
-                                onClick={() =>
-                                  handleTransition(
-                                    auction.id,
-                                    t,
-                                    auction.version,
-                                  )
-                                }
-                              >
-                                <ArrowRight size={14} /> → {t}
-                              </DropdownMenuItem>
-                            ))}
-                          </>
-                        )}
-
                         {auction.status === "draft" && (
                           <>
                             <DropdownMenuSeparator />

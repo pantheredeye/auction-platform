@@ -1,3 +1,5 @@
+import { nanoid } from "nanoid";
+
 export function slugify(text: string): string {
   return text
     .toLowerCase()
@@ -6,4 +8,8 @@ export function slugify(text: string): string {
     .replace(/[\s_]+/g, "-")
     .replace(/-+/g, "-")
     .replace(/^-|-$/g, "");
+}
+
+export function generateSlug(title: string): string {
+  return `${slugify(title)}-${nanoid(6)}`;
 }
